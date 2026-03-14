@@ -1,12 +1,13 @@
 # AMD GPU requirements (ROCm 7.2, Windows)
 # Uses the universal ROCm package from AMD, which requires Python 3.12.
+# Versions are pinned to prevent pip from preferring newer CPU-only wheels from PyPI.
 
 --find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2/
 
-rocm-sdk-core
-rocm-sdk-devel
-rocm-sdk-libraries-custom
-rocm
-torch
-torchvision
-torchaudio
+rocm-sdk-core==7.2.0.dev0
+rocm-sdk-devel==7.2.0.dev0
+rocm-sdk-libraries-custom==7.2.0.dev0
+rocm==7.2.0.dev0
+torch==2.9.1+rocmsdk20260116
+torchvision==0.24.1+rocmsdk20260116
+torchaudio==2.9.1+rocmsdk20260116
