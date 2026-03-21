@@ -1,8 +1,9 @@
 # AMD GPU requirements (ROCm, RDNA 4 - RX 9000 series)
+# Versions are pinned to prevent future pytorch releases from silently changing built environments.
 
 --index-url https://repo.amd.com/rocm/whl/gfx120X-all/
 --extra-index-url https://pypi.org/simple
 
-torch
-torchvision
-torchaudio
+torch==2.9.1+rocm7.11.0
+torchvision==0.24.0+rocm7.11.0
+torchaudio==2.9.0+rocm7.11.0

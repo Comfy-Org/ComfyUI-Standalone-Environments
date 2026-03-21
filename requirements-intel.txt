@@ -1,8 +1,9 @@
 # Intel GPU requirements (XPU - Arc GPUs)
+# Versions are pinned to prevent future pytorch releases from silently changing built environments.
 
 --index-url https://download.pytorch.org/whl/xpu
 --extra-index-url https://pypi.org/simple
 
-torch
-torchvision
-torchaudio
+torch==2.10.0+xpu
+torchvision==0.25.0+xpu
+torchaudio==2.10.0+xpu

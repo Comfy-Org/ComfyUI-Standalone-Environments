@@ -1,7 +1,8 @@
 # NVIDIA GPU requirements (CUDA 12.8)
+# Versions are pinned to prevent future pytorch releases from silently changing built environments.
 
 --extra-index-url https://download.pytorch.org/whl/cu128
 
-torch
-torchvision
-torchaudio
+torch==2.10.0+cu128
+torchvision==0.25.0+cu128
+torchaudio==2.10.0+cu128

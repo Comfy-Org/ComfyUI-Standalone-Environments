@@ -1,4 +1,5 @@
 # AMD GPU requirements (ROCm)
+# Versions are pinned to prevent future pytorch releases from silently changing built environments.
 #
 # Note: This is for AMD GPUs with ROCm support.
 # For experimental Windows/Linux support on RDNA 3/3.5/4, see README.md
@@ -6,6 +7,6 @@
 --index-url https://download.pytorch.org/whl/rocm7.1
 --extra-index-url https://pypi.org/simple
 
-torch
-torchvision
-torchaudio
+torch==2.10.0+rocm7.1
+torchvision==0.25.0+rocm7.1
+torchaudio==2.10.0+rocm7.1

@@ -1,5 +1,6 @@
 # macOS requirements (MPS - Apple Silicon)
+# Versions are pinned to prevent future pytorch releases from silently changing built environments.
 
-torch
-torchvision
-torchaudio
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
