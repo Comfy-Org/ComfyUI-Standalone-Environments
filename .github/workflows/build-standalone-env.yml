@@ -64,6 +64,10 @@ jobs:
             os: ubuntu-latest
             python_platform: x86_64-unknown-linux-gnu
             vendor_requirements: requirements-amd.txt
+          - id: linux-intel-xpu
+            os: ubuntu-latest
+            python_platform: x86_64-unknown-linux-gnu
+            vendor_requirements: requirements-intel.txt
           # macOS
           - id: mac-mps
             os: macos-latest
