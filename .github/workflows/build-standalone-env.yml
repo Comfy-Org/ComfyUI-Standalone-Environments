@@ -11,9 +11,9 @@ on:
         required: false
         default: ""
       release_tag:
-        description: "Tag for the GitHub Release to upload to"
-        required: true
-        default: "standalone-v0.1.0"
+        description: "Release tag override (leave empty to auto-compute v{comfyui}-env{N})"
+        required: false
+        default: ""
 
 env:
   PYTHON_VERSION: "3.13.12"
@@ -101,6 +101,62 @@ jobs:
             echo "Auto-detected latest stable release: $REF"
           fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # If tag push or explicit override, use that directly
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          elif [[ -n "${{ inputs.release_tag }}" ]]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            # Auto-compute: v{comfyui_version}-env{N}
+            COMFYUI_REF="${{ steps.comfyui.outputs.ref }}"
+
+            # Find highest existing env number for this ComfyUI version from R2
+            NEXT_BUILD=1
+            if [[ -n "$AWS_ACCESS_KEY_ID" && -n "${{ secrets.R2_BUCKET_NAME }}" ]]; then
+              pip install awscli -q 2>/dev/null
+              # Download latest.json and check for existing tags with this version
+              LATEST_JSON=$(aws s3 cp \
+                "s3://${{ secrets.R2_BUCKET_NAME }}/standalone-environments/latest.json" - \
+                --endpoint-url "${{ secrets.R2_ENDPOINT }}" 2>/dev/null || echo '{}')
+              # Extract highest env number across all vendors for this comfyui version
+              HIGHEST=$(echo "$LATEST_JSON" | python3 -c "
+          import json, sys, re
+          data = json.load(sys.stdin)
+          version = '${COMFYUI_REF}'
+          max_build = 0
+          for vendor, release in data.items():
+              if release.get('comfyui_version') == version:
+                  m = re.search(r'-env(\d+)$', release.get('tag', ''))
+                  if m:
+                      max_build = max(max_build, int(m.group(1)))
+          print(max_build)
+              " 2>/dev/null || echo "0")
+              NEXT_BUILD=$((HIGHEST + 1))
+            fi
+
+            TAG="${COMFYUI_REF}-env${NEXT_BUILD}"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: $TAG"
+
+          # Extract build number from tag
+          BUILD=$(echo "$TAG" | sed -n 's/.*-env\([0-9]*\)$/\1/p')
+          if [[ -z "$BUILD" ]]; then
+            BUILD="0"
+          fi
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+          # Export ARCHIVE_BASE once for all subsequent steps in this job
+          echo "ARCHIVE_BASE=comfyui-standalone-${{ matrix.id }}-${TAG}" >> "$GITHUB_ENV"
 
       - name: Download python-build-standalone
         shell: bash
@@ -258,6 +314,8 @@ jobs:
         shell: bash
         run: |
           COMFYUI_COMMIT=$(git -C ComfyUI rev-parse HEAD)
+          RELEASE_TAG="${{ steps.release.outputs.tag }}"
+          BUILD_NUMBER="${{ steps.release.outputs.build }}"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             PYTHON="standalone-env/python.exe"
             UV_VERSION=$(standalone-env/uv.exe --version | awk '{print $2}')
@@ -270,7 +328,6 @@ jobs:
           TORCHVISION_VERSION=$("$PYTHON" -c "import torchvision; print(torchvision.__version__)" 2>/dev/null || echo "N/A")
           TORCHAUDIO_VERSION=$("$PYTHON" -c "import torchaudio; print(torchaudio.__version__)" 2>/dev/null || echo "N/A")
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.comfyui.outputs.ref }}"
           "$PYTHON" -c "
           import json, pathlib
           vendor_req = pathlib.Path('${{ matrix.vendor_requirements }}').read_text().strip()
@@ -278,7 +335,8 @@ jobs:
           manager_req = pathlib.Path('ComfyUI/manager_requirements.txt').read_text().strip()
           manifest = {
               'id': '${{ matrix.id }}',
-              'version': '${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}',
+              'version': '${RELEASE_TAG}',
+              'build': int('${BUILD_NUMBER}'),
               'archive_base': '${ARCHIVE_BASE}',
               'files': [],
               'comfyui_ref': '${{ steps.comfyui.outputs.ref }}',
@@ -303,19 +361,95 @@ jobs:
       - name: Package archive
         shell: bash
         run: |
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.comfyui.outputs.ref }}"
+          # Single 7z compression. The unsplit archive is uploaded to R2 as-is and
+          # then sliced with `split` into GitHub-compatible volumes (.001/.002/...).
+          # 7z multi-volume format is byte-aligned (no per-volume header), so the
+          # split chunks are bit-identical to what `7z -v` would produce — verified
+          # by SHA-256 comparison against an existing release.
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             tar -czf "${ARCHIVE_BASE}.tar.gz" standalone-env ComfyUI manifest.json "${{ matrix.vendor_requirements }}"
           else
             7z a -t7z -m0=lzma2 -mx=3 -mfb=32 -md=16m -ms=on -mf=off \
-              -v1900m \
               "${ARCHIVE_BASE}.7z" standalone-env ComfyUI manifest.json "${{ matrix.vendor_requirements }}"
+            ls -lh "${ARCHIVE_BASE}.7z"
           fi
+
+      - name: Upload archive to R2
+        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          R2_PREFIX="standalone-environments/${{ matrix.id }}/${{ steps.release.outputs.tag }}"
+
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            UPLOAD_FILE="${ARCHIVE_BASE}.tar.gz"
+          else
+            # Reuse the single unsplit archive built in "Package archive"
+            UPLOAD_FILE="${ARCHIVE_BASE}.7z"
+          fi
+
+          pip install awscli
+
+          # Upload archive
+          aws s3 cp "$UPLOAD_FILE" \
+            "s3://${{ secrets.R2_BUCKET_NAME }}/${R2_PREFIX}/${UPLOAD_FILE}" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+          # Upload per-variant manifest
+          aws s3 cp manifest.json \
+            "s3://${{ secrets.R2_BUCKET_NAME }}/${R2_PREFIX}/manifest.json" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+
+          # Record file size for releases.json
+          FILE_SIZE=$(stat -c%s "$UPLOAD_FILE" 2>/dev/null || stat -f%z "$UPLOAD_FILE")
+          echo "$FILE_SIZE" > r2-size.txt
+          echo "R2 archive size: $FILE_SIZE bytes"
+
+      - name: Split archive for GitHub Releases
+        if: ${{ runner.os != 'macOS' }}
+        shell: bash
+        run: |
+          # 7z's multi-volume format is byte-aligned, so naive `split` produces
+          # chunks bit-identical to `7z -v1900m` output. Doing the split here
+          # (instead of a second full compression pass) avoids ~5–15 min of CPU
+          # per Windows/Linux variant.
+          UNSPLIT_SIZE=$(stat -c%s "${ARCHIVE_BASE}.7z" 2>/dev/null || stat -f%z "${ARCHIVE_BASE}.7z")
+          echo "Unsplit archive size: ${UNSPLIT_SIZE} bytes"
+
+          # Split into 1900 MiB volumes named .001, .002, ... — matches the suffix
+          # scheme the launcher's extractor expects (regex /\.001$/).
+          split -b 1900m -d -a 3 --numeric-suffixes=1 \
+            "${ARCHIVE_BASE}.7z" "${ARCHIVE_BASE}.7z."
+          ls -lh "${ARCHIVE_BASE}.7z."*
+
+          # Sanity check: sum part sizes via stat (no I/O of payload) and compare
+          # to the unsplit size as integers.
+          CONCAT_SIZE=0
+          for part in "${ARCHIVE_BASE}.7z."*; do
+            PART_SIZE=$(stat -c%s "$part" 2>/dev/null || stat -f%z "$part")
+            CONCAT_SIZE=$((CONCAT_SIZE + PART_SIZE))
+          done
+          if [[ "$CONCAT_SIZE" -ne "$UNSPLIT_SIZE" ]]; then
+            echo "::error::Split chunks (${CONCAT_SIZE} bytes) do not match the unsplit archive (${UNSPLIT_SIZE} bytes)"
+            exit 1
+          fi
+
+          # Remove the unsplit archive so the GitHub release upload's wildcard
+          # only picks up the split parts.
+          rm -f "${ARCHIVE_BASE}.7z"
+
+      - name: Upload R2 size artifact
+        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-size-${{ matrix.id }}
+          path: r2-size.txt
 
       - name: Populate manifest files list
         shell: bash
         run: |
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.comfyui.outputs.ref }}"
           FILES=$(ls -1 "${ARCHIVE_BASE}".* 2>/dev/null | sort)
           echo "=== Archive files ==="
           ls -lh ${ARCHIVE_BASE}.* 2>/dev/null
@@ -341,9 +475,9 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+          tag_name: ${{ steps.release.outputs.tag }}
           files: |
-            comfyui-standalone-${{ matrix.id }}-${{ steps.comfyui.outputs.ref }}.*
+            comfyui-standalone-${{ matrix.id }}-${{ steps.release.outputs.tag }}.*
           fail_on_unmatched_files: false
           draft: true
         env:
@@ -358,6 +492,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: manifest-*
+
+      - name: Download R2 size artifacts
+        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: r2-size-*
+          merge-multiple: false
 
       - name: Combine manifests
         shell: bash
@@ -382,3 +523,127 @@ jobs:
           draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update R2 release metadata
+        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          pip install awscli
+          R2_BASE="s3://${R2_BUCKET}/standalone-environments"
+
+          # Build release entries from manifests
+          python3 -c "
+          import json, glob, os
+
+          entries = []
+          for manifest_path in sorted(glob.glob('manifest-*/manifest.json')):
+              with open(manifest_path) as fh:
+                  m = json.load(fh)
+
+              variant_id = m['id']
+              tag = m['version']
+              archive_base = m['archive_base']
+              filename = archive_base + ('.tar.gz' if 'mac' in variant_id else '.7z')
+
+              size_file = f'r2-size-{variant_id}/r2-size.txt'
+              size = 0
+              if os.path.exists(size_file):
+                  with open(size_file) as sf:
+                      size = int(sf.read().strip())
+
+              entries.append({
+                  'variant_id': variant_id,
+                  'entry': {
+                      'tag': tag,
+                      'comfyui_version': m['comfyui_ref'],
+                      'comfyui_commit': m['comfyui_commit'],
+                      'build': m.get('build', 0),
+                      'date': m['build_date'],
+                      'file': filename,
+                      'size': size,
+                      'python_version': m['python_version'],
+                      'torch_version': m['torch_version'],
+                      'torchvision_version': m['torchvision_version'],
+                      'torchaudio_version': m['torchaudio_version'],
+                  },
+              })
+
+          with open('r2-entries.json', 'w') as fh:
+              json.dump(entries, fh, indent=2)
+          "
+
+          # Update per-vendor releases.json files
+          python3 -c "
+          import json
+
+          with open('r2-entries.json') as fh:
+              entries = json.load(fh)
+
+          # Group entries by vendor
+          vendors = {}
+          for e in entries:
+              vid = e['variant_id']
+              vendors.setdefault(vid, []).append(e['entry'])
+
+          for vid, new_entries in vendors.items():
+              with open(f'vendor-{vid}.json', 'w') as fh:
+                  json.dump(new_entries, fh)
+          "
+
+          # For each vendor: download existing, merge, sort, upload
+          for VENDOR_FILE in vendor-*.json; do
+            VENDOR_ID=$(echo "$VENDOR_FILE" | sed 's/^vendor-//; s/\.json$//')
+            REMOTE_PATH="${R2_BASE}/${VENDOR_ID}/releases.json"
+
+            # Download existing or start fresh
+            aws s3 cp "$REMOTE_PATH" "existing-${VENDOR_ID}.json" \
+              --endpoint-url "$R2_ENDPOINT" 2>/dev/null || echo '{"releases":[]}' > "existing-${VENDOR_ID}.json"
+
+            python3 -c "
+          import json
+          with open('existing-${VENDOR_ID}.json') as fh:
+              data = json.load(fh)
+          releases = data.get('releases', [])
+          with open('${VENDOR_FILE}') as fh:
+              new_entries = json.load(fh)
+          for entry in new_entries:
+              releases = [r for r in releases if r.get('tag') != entry['tag']]
+              releases.append(entry)
+          releases.sort(key=lambda x: x['date'], reverse=True)
+          with open('upload-${VENDOR_ID}.json', 'w') as fh:
+              json.dump({'releases': releases}, fh, indent=2)
+            "
+
+            echo "=== ${VENDOR_ID}/releases.json ==="
+            cat "upload-${VENDOR_ID}.json"
+
+            aws s3 cp "upload-${VENDOR_ID}.json" "$REMOTE_PATH" \
+              --endpoint-url "$R2_ENDPOINT"
+          done
+
+          # Build latest.json: newest release per vendor
+          python3 -c "
+          import json, glob
+
+          latest = {}
+          for f in sorted(glob.glob('upload-*.json')):
+              vendor_id = f.replace('upload-', '').replace('.json', '')
+              with open(f) as fh:
+                  data = json.load(fh)
+              if data['releases']:
+                  latest[vendor_id] = data['releases'][0]
+
+          with open('latest.json', 'w') as fh:
+              json.dump(latest, fh, indent=2)
+          "
+
+          echo "=== latest.json ==="
+          cat latest.json
+
+          aws s3 cp latest.json "${R2_BASE}/latest.json" \
+            --endpoint-url "$R2_ENDPOINT"
