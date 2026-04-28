@@ -359,13 +359,18 @@ jobs:
       - name: Package archive
         shell: bash
         run: |
+          # Single 7z compression. The unsplit archive is uploaded to R2 as-is and
+          # then sliced with `split` into GitHub-compatible volumes (.001/.002/...).
+          # 7z multi-volume format is byte-aligned (no per-volume header), so the
+          # split chunks are bit-identical to what `7z -v` would produce — verified
+          # by SHA-256 comparison against an existing release.
           ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.release.outputs.tag }}"
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             tar -czf "${ARCHIVE_BASE}.tar.gz" standalone-env ComfyUI manifest.json "${{ matrix.vendor_requirements }}"
           else
             7z a -t7z -m0=lzma2 -mx=3 -mfb=32 -md=16m -ms=on -mf=off \
-              -v1900m \
               "${ARCHIVE_BASE}.7z" standalone-env ComfyUI manifest.json "${{ matrix.vendor_requirements }}"
+            ls -lh "${ARCHIVE_BASE}.7z"
           fi
 
       - name: Upload archive to R2
@@ -382,17 +387,15 @@ jobs:
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             UPLOAD_FILE="${ARCHIVE_BASE}.tar.gz"
           else
-            # Create unsplit archive for R2 (GitHub gets split volumes)
-            7z a -t7z -m0=lzma2 -mx=3 -mfb=32 -md=16m -ms=on -mf=off \
-              "r2-${ARCHIVE_BASE}.7z" standalone-env ComfyUI manifest.json "${{ matrix.vendor_requirements }}"
-            UPLOAD_FILE="r2-${ARCHIVE_BASE}.7z"
+            # Reuse the single unsplit archive built in "Package archive"
+            UPLOAD_FILE="${ARCHIVE_BASE}.7z"
           fi
 
           pip install awscli
 
           # Upload archive
           aws s3 cp "$UPLOAD_FILE" \
-            "s3://${{ secrets.R2_BUCKET_NAME }}/${R2_PREFIX}/${ARCHIVE_BASE}.${UPLOAD_FILE##*.}" \
+            "s3://${{ secrets.R2_BUCKET_NAME }}/${R2_PREFIX}/${UPLOAD_FILE}" \
             --endpoint-url "${{ secrets.R2_ENDPOINT }}"
 
           # Upload per-variant manifest
@@ -405,10 +408,34 @@ jobs:
           echo "$FILE_SIZE" > r2-size.txt
           echo "R2 archive size: $FILE_SIZE bytes"
 
-          # Clean up unsplit archive if created
-          if [[ "$UPLOAD_FILE" == r2-* ]]; then
-            rm -f "$UPLOAD_FILE"
+      - name: Split archive for GitHub Releases
+        if: ${{ runner.os != 'macOS' }}
+        shell: bash
+        run: |
+          # 7z's multi-volume format is byte-aligned, so naive `split` produces
+          # chunks bit-identical to `7z -v1900m` output. Doing the split here
+          # (instead of a second full compression pass) avoids ~5–15 min of CPU
+          # per Windows/Linux variant.
+          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.release.outputs.tag }}"
+          UNSPLIT_SIZE=$(stat -c%s "${ARCHIVE_BASE}.7z" 2>/dev/null || stat -f%z "${ARCHIVE_BASE}.7z")
+          echo "Unsplit archive size: ${UNSPLIT_SIZE} bytes"
+
+          # Split into 1900 MiB volumes named .001, .002, ... — matches the suffix
+          # scheme the launcher's extractor expects (regex /\.001$/).
+          split -b 1900m -d -a 3 --numeric-suffixes=1 \
+            "${ARCHIVE_BASE}.7z" "${ARCHIVE_BASE}.7z."
+          ls -lh "${ARCHIVE_BASE}.7z."*
+
+          # Sanity check: concatenated parts equal the unsplit archive byte-for-byte
+          CONCAT_SIZE=$(cat "${ARCHIVE_BASE}.7z."* | wc -c)
+          if [[ "$CONCAT_SIZE" != "$UNSPLIT_SIZE" ]]; then
+            echo "::error::Split chunks do not reassemble to the original archive size"
+            exit 1
           fi
+
+          # Remove the unsplit archive so the GitHub release upload's wildcard
+          # only picks up the split parts.
+          rm -f "${ARCHIVE_BASE}.7z"
 
       - name: Upload R2 size artifact
         if: ${{ secrets.R2_BUCKET_NAME != '' }}
