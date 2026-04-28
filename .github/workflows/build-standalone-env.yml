@@ -77,6 +77,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Build ${{ matrix.id }}
 
+    # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions can
+    # reference it via the `env` context — `secrets` is not allowed in `if:`.
+    env:
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+
     steps:
       - name: Checkout launcher repo
         uses: actions/checkout@v4
@@ -375,7 +380,7 @@ jobs:
           fi
 
       - name: Upload archive to R2
-        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        if: ${{ env.R2_BUCKET_NAME != '' }}
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -441,7 +446,7 @@ jobs:
           rm -f "${ARCHIVE_BASE}.7z"
 
       - name: Upload R2 size artifact
-        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        if: ${{ env.R2_BUCKET_NAME != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: r2-size-${{ matrix.id }}
@@ -487,6 +492,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     name: Publish manifests
+    # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions can
+    # reference it via the `env` context — `secrets` is not allowed in `if:`.
+    env:
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
     steps:
       - name: Download all manifests
         uses: actions/download-artifact@v4
@@ -494,7 +503,7 @@ jobs:
           pattern: manifest-*
 
       - name: Download R2 size artifacts
-        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        if: ${{ env.R2_BUCKET_NAME != '' }}
         uses: actions/download-artifact@v4
         with:
           pattern: r2-size-*
@@ -525,7 +534,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update R2 release metadata
-        if: ${{ secrets.R2_BUCKET_NAME != '' }}
+        if: ${{ env.R2_BUCKET_NAME != '' }}
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
