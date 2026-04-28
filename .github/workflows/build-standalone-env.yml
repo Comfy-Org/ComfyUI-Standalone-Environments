@@ -11,9 +11,9 @@ on:
         required: false
         default: ""
       release_tag:
-        description: "Release tag in v{comfyui_version}-env{build} format"
-        required: true
-        default: "v0.3.28-env1"
+        description: "Release tag override (leave empty to auto-compute v{comfyui}-env{N})"
+        required: false
+        default: ""
 
 env:
   PYTHON_VERSION: "3.13.12"
@@ -105,10 +105,50 @@ jobs:
       - name: Resolve release tag
         id: release
         shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          TAG="${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}"
+          # If tag push or explicit override, use that directly
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          elif [[ -n "${{ inputs.release_tag }}" ]]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            # Auto-compute: v{comfyui_version}-env{N}
+            COMFYUI_REF="${{ steps.comfyui.outputs.ref }}"
+
+            # Find highest existing env number for this ComfyUI version from R2
+            NEXT_BUILD=1
+            if [[ -n "$AWS_ACCESS_KEY_ID" && -n "${{ secrets.R2_BUCKET_NAME }}" ]]; then
+              pip install awscli -q 2>/dev/null
+              # Download latest.json and check for existing tags with this version
+              LATEST_JSON=$(aws s3 cp \
+                "s3://${{ secrets.R2_BUCKET_NAME }}/standalone-environments/latest.json" - \
+                --endpoint-url "${{ secrets.R2_ENDPOINT }}" 2>/dev/null || echo '{}')
+              # Extract highest env number across all vendors for this comfyui version
+              HIGHEST=$(echo "$LATEST_JSON" | python3 -c "
+          import json, sys, re
+          data = json.load(sys.stdin)
+          version = '${COMFYUI_REF}'
+          max_build = 0
+          for vendor, release in data.items():
+              if release.get('comfyui_version') == version:
+                  m = re.search(r'-env(\d+)$', release.get('tag', ''))
+                  if m:
+                      max_build = max(max_build, int(m.group(1)))
+          print(max_build)
+              " 2>/dev/null || echo "0")
+              NEXT_BUILD=$((HIGHEST + 1))
+            fi
+
+            TAG="${COMFYUI_REF}-env${NEXT_BUILD}"
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          # Extract build number from tag (e.g., v0.18.2-env1 -> 1)
+          echo "Resolved release tag: $TAG"
+
+          # Extract build number from tag
           BUILD=$(echo "$TAG" | sed -n 's/.*-env\([0-9]*\)$/\1/p')
           if [[ -z "$BUILD" ]]; then
             BUILD="0"
