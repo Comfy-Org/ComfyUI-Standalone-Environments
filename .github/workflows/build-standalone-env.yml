@@ -155,6 +155,9 @@ jobs:
           fi
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
 
+          # Export ARCHIVE_BASE once for all subsequent steps in this job
+          echo "ARCHIVE_BASE=comfyui-standalone-${{ matrix.id }}-${TAG}" >> "$GITHUB_ENV"
+
       - name: Download python-build-standalone
         shell: bash
         run: |
@@ -325,7 +328,6 @@ jobs:
           TORCHVISION_VERSION=$("$PYTHON" -c "import torchvision; print(torchvision.__version__)" 2>/dev/null || echo "N/A")
           TORCHAUDIO_VERSION=$("$PYTHON" -c "import torchaudio; print(torchaudio.__version__)" 2>/dev/null || echo "N/A")
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${RELEASE_TAG}"
           "$PYTHON" -c "
           import json, pathlib
           vendor_req = pathlib.Path('${{ matrix.vendor_requirements }}').read_text().strip()
@@ -364,7 +366,6 @@ jobs:
           # 7z multi-volume format is byte-aligned (no per-volume header), so the
           # split chunks are bit-identical to what `7z -v` would produce — verified
           # by SHA-256 comparison against an existing release.
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.release.outputs.tag }}"
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             tar -czf "${ARCHIVE_BASE}.tar.gz" standalone-env ComfyUI manifest.json "${{ matrix.vendor_requirements }}"
           else
@@ -380,9 +381,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          RELEASE_TAG="${{ steps.release.outputs.tag }}"
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${RELEASE_TAG}"
-          R2_PREFIX="standalone-environments/${{ matrix.id }}/${RELEASE_TAG}"
+          R2_PREFIX="standalone-environments/${{ matrix.id }}/${{ steps.release.outputs.tag }}"
 
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             UPLOAD_FILE="${ARCHIVE_BASE}.tar.gz"
@@ -416,7 +415,6 @@ jobs:
           # chunks bit-identical to `7z -v1900m` output. Doing the split here
           # (instead of a second full compression pass) avoids ~5–15 min of CPU
           # per Windows/Linux variant.
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.release.outputs.tag }}"
           UNSPLIT_SIZE=$(stat -c%s "${ARCHIVE_BASE}.7z" 2>/dev/null || stat -f%z "${ARCHIVE_BASE}.7z")
           echo "Unsplit archive size: ${UNSPLIT_SIZE} bytes"
 
@@ -426,10 +424,15 @@ jobs:
             "${ARCHIVE_BASE}.7z" "${ARCHIVE_BASE}.7z."
           ls -lh "${ARCHIVE_BASE}.7z."*
 
-          # Sanity check: concatenated parts equal the unsplit archive byte-for-byte
-          CONCAT_SIZE=$(cat "${ARCHIVE_BASE}.7z."* | wc -c)
-          if [[ "$CONCAT_SIZE" != "$UNSPLIT_SIZE" ]]; then
-            echo "::error::Split chunks do not reassemble to the original archive size"
+          # Sanity check: sum part sizes via stat (no I/O of payload) and compare
+          # to the unsplit size as integers.
+          CONCAT_SIZE=0
+          for part in "${ARCHIVE_BASE}.7z."*; do
+            PART_SIZE=$(stat -c%s "$part" 2>/dev/null || stat -f%z "$part")
+            CONCAT_SIZE=$((CONCAT_SIZE + PART_SIZE))
+          done
+          if [[ "$CONCAT_SIZE" -ne "$UNSPLIT_SIZE" ]]; then
+            echo "::error::Split chunks (${CONCAT_SIZE} bytes) do not match the unsplit archive (${UNSPLIT_SIZE} bytes)"
             exit 1
           fi
 
@@ -447,7 +450,6 @@ jobs:
       - name: Populate manifest files list
         shell: bash
         run: |
-          ARCHIVE_BASE="comfyui-standalone-${{ matrix.id }}-${{ steps.release.outputs.tag }}"
           FILES=$(ls -1 "${ARCHIVE_BASE}".* 2>/dev/null | sort)
           echo "=== Archive files ==="
           ls -lh ${ARCHIVE_BASE}.* 2>/dev/null
