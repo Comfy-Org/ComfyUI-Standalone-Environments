@@ -1,0 +1,70 @@
+name: Publish Torch Index Stacks
+
+# Publishes torch-index-stacks.json to R2, where ComfyUI Desktop 2.0 fetches
+# it to populate the PyTorch picker with index-served stacks. Pull requests
+# only validate; pushes to main validate and publish. workflow_dispatch
+# republishes the checked-in file (e.g. after rotating the bucket).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - torch-index-stacks.json
+      - scripts/validate_torch_index_stacks.py
+      - .github/workflows/publish-torch-index-stacks.yml
+  pull_request:
+    paths:
+      - torch-index-stacks.json
+      - scripts/validate_torch_index_stacks.py
+      - .github/workflows/publish-torch-index-stacks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize publishes so two merges cannot race on the R2 object.
+concurrency:
+  group: publish-torch-index-stacks
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate manifest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate torch-index-stacks.json
+        run: python3 scripts/validate_torch_index_stacks.py torch-index-stacks.json
+
+  publish:
+    needs: validate
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    name: Publish to R2
+    # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions
+    # can reference it via the `env` context - `secrets` is not allowed in `if:`.
+    env:
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload manifest to R2
+        if: ${{ env.R2_BUCKET_NAME != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          pip install awscli
+          # Short cache TTL: unlike the immutable archives this object is
+          # replaced in-place, and stack WITHDRAWALS (explicit-empty) must
+          # propagate quickly through the Cloudflare edge.
+          aws s3 cp torch-index-stacks.json \
+            "s3://${R2_BUCKET_NAME}/standalone-environments/torch-index-stacks.json" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=300"
+          echo "Published torch-index-stacks.json to R2"
