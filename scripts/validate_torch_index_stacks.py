@@ -22,6 +22,10 @@ import sys
 SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # Package versions end up in pip `pkg==version` arguments - allowlist.
 SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+]*$")
+# PEP 440 dev release (any accepted spelling: .dev20260720, bare .dev,
+# compact dev1), checked against the public version (local tag stripped).
+# Keep in sync with isDevVersion() in the app's torchStackTypes.ts.
+DEV_RELEASE = re.compile(r"(\d|[._-])dev\d*$", re.IGNORECASE)
 PYTHON_ABI = re.compile(r"^\d+\.\d+$")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -84,6 +88,21 @@ def check_entry(i, r, errors):
         v = pkgs.get(opt)
         if v is not None and (not isinstance(v, str) or not SAFE_VERSION.match(v)):
             fail(f"packages.{opt} unsafe: {v!r}")
+
+    # Nightly (dev) builds live in a separate index namespace with ~60-day
+    # retention - a decaying promise schema 1 cannot express: older app
+    # versions would derive the STABLE index from the local tag, and even
+    # on apps that know the nightly namespace the entry rots as the wheel
+    # is purged. Exposing nightlies needs a future schema/kind with refresh
+    # automation behind it; until then reject them outright.
+    for name in ("torch", "torchvision", "torchaudio"):
+        v = pkgs.get(name)
+        if isinstance(v, str) and DEV_RELEASE.search(public_version(v)):
+            fail(
+                f"packages.{name} is a PEP 440 dev (nightly) release: {v!r} - "
+                "schema 1 is stable index stacks only; nightlies need a future "
+                "manifest kind with automated refresh"
+            )
 
     # One coherent source per accelerator: the accel must name an index tag
     # it can actually be served from, and the torch local tag must agree

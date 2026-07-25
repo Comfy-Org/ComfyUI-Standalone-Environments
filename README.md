@@ -19,3 +19,8 @@ editing this file - no app release needed.
   point installs at arbitrary indexes.
 - An explicit empty `"stacks": []` withdraws every index-served stack from
   all apps; deleting entries selectively withdraws just those.
+- Schema 1 is **stable index stacks only**: PEP 440 dev (nightly) versions
+  are rejected by validation. Dated nightly wheels are purged from
+  pytorch.org's index after roughly 60 days, so listing one would be a
+  promise that silently decays; offering nightlies in the picker needs a
+  future manifest kind with automated refresh behind it.
