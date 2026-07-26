@@ -21,13 +21,13 @@
       "platforms": ["win32", "linux"],
       "packages": {
         "torch": "2.13.0+cu126",
-        "torchvision": "0.28.0+cu126"
+        "torchvision": "0.28.0+cu126",
+        "torchaudio": "2.11.0+cu126"
       },
       "date": "2026-07-08",
       "computeCap": { "min": 5.0, "max": 9.0 },
       "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
-      "noteKey": "pytorchIndexNoteCu126",
-      "note": "CUDA 12.6. Does not include torchaudio; switching removes torchaudio if installed."
+      "noteKey": "pytorchIndexNoteCu126"
     },
     {
       "indexTag": "cu128",
@@ -77,41 +77,13 @@
       "platforms": ["win32", "linux"],
       "packages": {
         "torch": "2.13.0+cu130",
-        "torchvision": "0.28.0+cu130"
+        "torchvision": "0.28.0+cu130",
+        "torchaudio": "2.11.0+cu130"
       },
       "date": "2026-07-08",
       "computeCap": { "min": 7.5, "max": 12.1 },
       "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
-      "noteKey": "pytorchIndexNoteCu130",
-      "note": "CUDA 13.0. Does not include torchaudio; switching removes torchaudio if installed."
-    },
-    {
-      "indexTag": "cu132",
-      "accel": "nvidia",
-      "platforms": ["win32", "linux"],
-      "packages": {
-        "torch": "2.12.1+cu132",
-        "torchvision": "0.27.1+cu132"
-      },
-      "date": "2026-06-17",
-      "computeCap": { "min": 7.5, "max": 12.1 },
-      "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
-      "noteKey": "pytorchIndexNoteCu132",
-      "note": "CUDA 13.2. Does not include torchaudio; switching removes torchaudio if installed."
-    },
-    {
-      "indexTag": "cu132",
-      "accel": "nvidia",
-      "platforms": ["win32", "linux"],
-      "packages": {
-        "torch": "2.13.0+cu132",
-        "torchvision": "0.28.0+cu132"
-      },
-      "date": "2026-07-08",
-      "computeCap": { "min": 7.5, "max": 12.1 },
-      "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
-      "noteKey": "pytorchIndexNoteCu132",
-      "note": "CUDA 13.2. Does not include torchaudio; switching removes torchaudio if installed."
+      "noteKey": "pytorchIndexNoteCu130"
     },
     {
       "indexTag": "rocm7.1",
@@ -145,12 +117,12 @@
       "platforms": ["win32", "linux"],
       "packages": {
         "torch": "2.13.0+xpu",
-        "torchvision": "0.28.0+xpu"
+        "torchvision": "0.28.0+xpu",
+        "torchaudio": "2.11.0+xpu"
       },
       "date": "2026-07-08",
       "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
-      "noteKey": "pytorchIndexNoteXpu",
-      "note": "Intel XPU. Does not include torchaudio; switching removes torchaudio if installed."
+      "noteKey": "pytorchIndexNoteXpu"
     },
     {
       "indexTag": "cpu",
