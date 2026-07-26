@@ -61,6 +61,25 @@ def stable_entry(**overrides):
     return entry
 
 
+def amd_multi_arch_entry(**overrides):
+    """A valid amd-multi-arch-index entry (AMD TheRock multi-arch wheels)."""
+    entry = {
+        "kind": "amd-multi-arch-index",
+        "indexTag": "rocm7.14.0",
+        "accel": "amd",
+        "platforms": ["win32", "linux"],
+        "packages": {
+            "torch": "2.10.0+rocm7.14.0",
+            "torchvision": "0.25.0+rocm7.14.0",
+            "torchaudio": "2.10.0+rocm7.14.0",
+        },
+        "date": "2026-07-15",
+        "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
+    }
+    entry.update(overrides)
+    return entry
+
+
 def entry_errors(entry):
     errors = []
     validator.check_entry(0, entry, errors)
@@ -163,6 +182,54 @@ class ValidatorExistingRules(unittest.TestCase):
     def test_repo_manifest_is_valid(self):
         manifest = Path(__file__).resolve().parent.parent / "torch-index-stacks.json"
         self.assertEqual(validator.main(str(manifest)), 0)
+
+
+class ValidatorAmdMultiArchRules(unittest.TestCase):
+    def test_valid_amd_multi_arch_passes(self):
+        self.assertEqual(entry_errors(amd_multi_arch_entry()), [])
+
+    def test_linux_only_amd_multi_arch_passes(self):
+        self.assertEqual(entry_errors(amd_multi_arch_entry(platforms=["linux"])), [])
+
+    def test_non_amd_accel_fails(self):
+        e = amd_multi_arch_entry(
+            indexTag="cu128",
+            accel="nvidia",
+            packages={"torch": "2.11.0+cu128"},
+        )
+        errs = entry_errors(e)
+        self.assertTrue(any("requires accel 'amd'" in x for x in errs), errs)
+
+    def test_dev_version_fails(self):
+        e = amd_multi_arch_entry()
+        e["packages"]["torch"] = "2.12.0.dev20260720+rocm7.14.0"
+        errs = entry_errors(e)
+        self.assertTrue(any("dev (nightly) release" in x for x in errs), errs)
+
+    def test_tag_mismatch_fails(self):
+        e = amd_multi_arch_entry()
+        e["packages"]["torch"] = "2.10.0+rocm7.2.1"
+        errs = entry_errors(e)
+        self.assertTrue(any("does not match indexTag" in x for x in errs), errs)
+
+    def test_non_rocm_index_tag_fails(self):
+        e = amd_multi_arch_entry(indexTag="cu130")
+        for pkg in e["packages"]:
+            e["packages"][pkg] = e["packages"][pkg].replace("+rocm7.14.0", "+cu130")
+        errs = entry_errors(e)
+        self.assertTrue(any("is not valid for accel" in x for x in errs), errs)
+
+    def test_plain_pytorch_index_amd_win32_still_fails(self):
+        # The multi-arch kind must not loosen the rule for ordinary entries.
+        e = amd_multi_arch_entry(kind="pytorch-index")
+        errs = entry_errors(e)
+        self.assertTrue(any("cannot target win32" in x for x in errs), errs)
+
+    def test_no_url_fields_accepted(self):
+        # The index URL is a trusted constant in the app; entries cannot
+        # smuggle one in through the manifest.
+        errs = entry_errors(amd_multi_arch_entry(indexUrl="https://evil.example/simple"))
+        self.assertTrue(any("unknown field" in x.lower() or "indexUrl" in x for x in errs), errs)
 
 
 def series_errors(series):

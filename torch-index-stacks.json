@@ -25,6 +25,10 @@
       "noteKey": "pytorchSeriesNoteRocm71",
       "note": "AMD ROCm 7.1 - official PyTorch builds, Linux only"
     },
+    "rocm7.14.0": {
+      "noteKey": "pytorchSeriesNoteRocm714",
+      "note": "AMD ROCm 7.14 - TheRock multi-arch builds for Windows and Linux"
+    },
     "xpu": {
       "noteKey": "pytorchSeriesNoteXpu",
       "note": "Intel XPU - for Intel Arc and Core Ultra integrated GPUs"
@@ -145,6 +149,34 @@
       "date": "2026-03-23",
       "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
       "noteKey": "pytorchIndexNoteRocm71"
+    },
+    {
+      "kind": "amd-multi-arch-index",
+      "indexTag": "rocm7.14.0",
+      "accel": "amd",
+      "platforms": ["win32", "linux"],
+      "packages": {
+        "torch": "2.11.0+rocm7.14.0",
+        "torchvision": "0.26.0+rocm7.14.0",
+        "torchaudio": "2.11.0+rocm7.14.0"
+      },
+      "date": "2026-07-15",
+      "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
+      "noteKey": "pytorchIndexNoteRocm714"
+    },
+    {
+      "kind": "amd-multi-arch-index",
+      "indexTag": "rocm7.14.0",
+      "accel": "amd",
+      "platforms": ["win32", "linux"],
+      "packages": {
+        "torch": "2.10.0+rocm7.14.0",
+        "torchvision": "0.25.0+rocm7.14.0",
+        "torchaudio": "2.10.0+rocm7.14.0"
+      },
+      "date": "2026-07-15",
+      "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
+      "noteKey": "pytorchIndexNoteRocm714"
     },
     {
       "indexTag": "xpu",
