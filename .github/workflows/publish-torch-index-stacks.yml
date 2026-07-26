@@ -12,11 +12,15 @@ on:
     paths:
       - torch-index-stacks.json
       - scripts/validate_torch_index_stacks.py
+      - scripts/refresh_nightly_stacks.py
+      - scripts/test_torch_index_scripts.py
       - .github/workflows/publish-torch-index-stacks.yml
   pull_request:
     paths:
       - torch-index-stacks.json
       - scripts/validate_torch_index_stacks.py
+      - scripts/refresh_nightly_stacks.py
+      - scripts/test_torch_index_scripts.py
       - .github/workflows/publish-torch-index-stacks.yml
   workflow_dispatch:
 
@@ -35,6 +39,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Run script tests
+        run: python3 -m unittest scripts.test_torch_index_scripts -v
 
       - name: Validate torch-index-stacks.json
         run: python3 scripts/validate_torch_index_stacks.py torch-index-stacks.json
@@ -58,7 +65,9 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          pip install awscli
+          # Runner-provided AWS CLI - installing one at runtime would let a
+          # compromised PyPI release run with publication credentials.
+          aws --version
           # Short cache TTL: unlike the immutable archives this object is
           # replaced in-place, and stack WITHDRAWALS (explicit-empty) must
           # propagate quickly through the Cloudflare edge.

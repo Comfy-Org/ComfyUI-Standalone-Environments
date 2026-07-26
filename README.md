@@ -19,8 +19,15 @@ editing this file - no app release needed.
   point installs at arbitrary indexes.
 - An explicit empty `"stacks": []` withdraws every index-served stack from
   all apps; deleting entries selectively withdraws just those.
-- Schema 1 is **stable index stacks only**: PEP 440 dev (nightly) versions
-  are rejected by validation. Dated nightly wheels are purged from
-  pytorch.org's index after roughly 60 days, so listing one would be a
-  promise that silently decays; offering nightlies in the picker needs a
-  future manifest kind with automated refresh behind it.
+- Stable entries never carry PEP 440 dev (nightly) versions - validation
+  rejects them. Nightlies use `"kind": "pytorch-nightly-index"` and are
+  managed exclusively by the scheduled `Refresh Nightly Torch Stacks`
+  workflow (`scripts/refresh_nightly_stacks.py`), which re-resolves exact
+  dated tuples from the live nightly indexes daily, validates, commits,
+  and publishes. Do not hand-edit nightly entries: dated nightly wheels
+  are purged from pytorch.org's index after roughly 60 days, so they are
+  pins that decay - validation rejects any nightly entry older than 7
+  days, and the desktop app stops offering entries ~45 days after their
+  wheel date. The tag allowlist (`NIGHTLY_TAGS`, currently `cu132`) lives
+  in the refresh script; old app versions ignore the nightly kind
+  entirely.

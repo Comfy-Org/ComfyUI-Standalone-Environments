@@ -18,6 +18,7 @@ Keep the rules here in sync with the app validator when the schema evolves.
 import json
 import re
 import sys
+from datetime import datetime, timezone
 
 SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # Package versions end up in pip `pkg==version` arguments - allowlist.
@@ -26,6 +27,18 @@ SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+]*$")
 # compact dev1), checked against the public version (local tag stripped).
 # Keep in sync with isDevVersion() in the app's torchStackTypes.ts.
 DEV_RELEASE = re.compile(r"(\d|[._-])dev\d*$", re.IGNORECASE)
+# Nightly entries must use the dated spelling the refresh automation
+# publishes - the date is what the freshness gates key on.
+NIGHTLY_DEV = re.compile(r"\.dev(\d{8})$")
+# Publish-side freshness bound for nightly entries; keep in sync with
+# MAX_AGE_DAYS in refresh_nightly_stacks.py. (The app additionally stops
+# OFFERING an entry ~45 days after its wheel date, ahead of PyTorch's
+# ~60-day index purge.)
+NIGHTLY_MAX_AGE_DAYS = 7
+# Nightlies are offered per-tag deliberately; keep in sync with
+# NIGHTLY_TAGS in refresh_nightly_stacks.py (which also withdraws entries
+# for delisted tags on its next run - this check catches hand-added ones).
+NIGHTLY_TAGS = {"cu132"}
 PYTHON_ABI = re.compile(r"^\d+\.\d+$")
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -63,9 +76,20 @@ def check_entry(i, r, errors):
         fail(f"accel must be one of {sorted(ACCELS)}, got {accel!r}")
         return
 
-    # `kind` must match the mechanism the app derives from the accelerator.
+    # `kind` must match a mechanism the app has: the stable kind derived
+    # from the accelerator, or `pytorch-nightly-index` for dev tuples
+    # (never for mps - PyPI serves no dev builds).
     expected_kind = "pypi" if accel == "mps" else "pytorch-index"
-    if "kind" in r and r["kind"] != expected_kind:
+    nightly = r.get("kind") == "pytorch-nightly-index"
+    if nightly and accel == "mps":
+        fail("mps entries cannot be nightly (PyPI serves no dev builds)")
+        return
+    if nightly and index_tag not in NIGHTLY_TAGS:
+        fail(
+            f"nightly indexTag {index_tag!r} is not offered (allowed: {sorted(NIGHTLY_TAGS)}) - "
+            "nightly entries are managed by scripts/refresh_nightly_stacks.py, not hand-edited"
+        )
+    if not nightly and "kind" in r and r["kind"] != expected_kind:
         fail(f"kind must be {expected_kind!r} for accel {accel!r} (or omitted), got {r['kind']!r}")
 
     platforms = r.get("platforms")
@@ -89,20 +113,51 @@ def check_entry(i, r, errors):
         if v is not None and (not isinstance(v, str) or not SAFE_VERSION.match(v)):
             fail(f"packages.{opt} unsafe: {v!r}")
 
-    # Nightly (dev) builds live in a separate index namespace with ~60-day
-    # retention - a decaying promise schema 1 cannot express: older app
-    # versions would derive the STABLE index from the local tag, and even
-    # on apps that know the nightly namespace the entry rots as the wheel
-    # is purged. Exposing nightlies needs a future schema/kind with refresh
-    # automation behind it; until then reject them outright.
-    for name in ("torch", "torchvision", "torchaudio"):
-        v = pkgs.get(name)
-        if isinstance(v, str) and DEV_RELEASE.search(public_version(v)):
-            fail(
-                f"packages.{name} is a PEP 440 dev (nightly) release: {v!r} - "
-                "schema 1 is stable index stacks only; nightlies need a future "
-                "manifest kind with automated refresh"
-            )
+    # The kind and the versions must agree. Stable entries reject dev
+    # versions: nightlies live in a separate index namespace with ~60-day
+    # retention, and older app versions (which drop the nightly kind
+    # entirely) would derive the STABLE index from a dev tuple's local tag.
+    # Nightly entries require dated dev versions throughout, all sharing
+    # one wheel date that matches the entry date and is fresh - stale pins
+    # must be re-resolved by the refresh automation, never republished.
+    if nightly:
+        wheel_dates = set()
+        for name in ("torch", "torchvision", "torchaudio"):
+            v = pkgs.get(name)
+            if not isinstance(v, str):
+                continue
+            m = NIGHTLY_DEV.search(public_version(v))
+            if not m:
+                fail(f"packages.{name} must be a dated .devYYYYMMDD nightly version, got {v!r}")
+            else:
+                wheel_dates.add(m.group(1))
+        if len(wheel_dates) > 1:
+            fail(f"nightly tuple must share one wheel date, got {sorted(wheel_dates)}")
+        elif wheel_dates:
+            d = next(iter(wheel_dates))
+            iso = f"{d[0:4]}-{d[4:6]}-{d[6:8]}"
+            if r.get("date") != iso:
+                fail(f"date must equal the wheel date {iso}, got {r.get('date')!r}")
+            else:
+                try:
+                    wheel_day = datetime.strptime(iso, "%Y-%m-%d").date()
+                    age = (datetime.now(timezone.utc).date() - wheel_day).days
+                except ValueError:
+                    age = None
+                if age is None or age < -1 or age > NIGHTLY_MAX_AGE_DAYS:
+                    fail(
+                        f"nightly wheel date {iso} is outside the {NIGHTLY_MAX_AGE_DAYS}-day "
+                        "publish window - run scripts/refresh_nightly_stacks.py to re-resolve"
+                    )
+    else:
+        for name in ("torch", "torchvision", "torchaudio"):
+            v = pkgs.get(name)
+            if isinstance(v, str) and DEV_RELEASE.search(public_version(v)):
+                fail(
+                    f"packages.{name} is a PEP 440 dev (nightly) release: {v!r} - "
+                    "stable entries cannot carry one; use kind pytorch-nightly-index "
+                    "via scripts/refresh_nightly_stacks.py"
+                )
 
     # One coherent source per accelerator: the accel must name an index tag
     # it can actually be served from, and the torch local tag must agree
