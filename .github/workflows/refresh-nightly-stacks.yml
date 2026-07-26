@@ -14,7 +14,9 @@ name: Refresh Nightly Torch Stacks
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    # :17 offset avoids the top-of-the-hour scheduler congestion, when
+    # GitHub-hosted cron runs are most likely to start late or be skipped.
+    - cron: '17 6 * * *'
   workflow_dispatch:
 
 permissions:
