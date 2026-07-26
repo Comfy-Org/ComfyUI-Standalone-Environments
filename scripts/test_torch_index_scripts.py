@@ -177,9 +177,10 @@ class RefresherParsing(unittest.TestCase):
     def test_parse_index_filters_wheels(self):
         html = index_html(
             [
-                # kept: dated dev, right tag, desktop platform, standard CPython
+                # kept: dated dev, right tag, desktop platform, standard
+                # CPython; percent-encoded anchor text must decode
                 "torch-2.14.0.dev20260724%2Bcu132-cp313-cp313-win_amd64.whl",
-                "torch-2.14.0.dev20260724%2Bcu132-cp312-cp312-manylinux_2_28_x86_64.whl",
+                "torch-2.14.0.dev20260724+cu132-cp312-cp312-manylinux_2_28_x86_64.whl",
                 # dropped: wrong index tag
                 "torch-2.14.0.dev20260724%2Bcu130-cp313-cp313-win_amd64.whl",
                 # dropped: not a dated dev build
@@ -195,8 +196,6 @@ class RefresherParsing(unittest.TestCase):
                 "torch-2.14.0.dev20260724.tar.gz",
             ]
         )
-        # The live index URL-encodes '+' in anchor text too; parse both forms.
-        html = html.replace("%2B", "+")
         wheels = refresher.parse_index("torch", "cu132", html)
         self.assertEqual(
             sorted(wheels),

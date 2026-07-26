@@ -27,11 +27,6 @@ on:
 permissions:
   contents: read
 
-# Serialize publishes so two merges cannot race on the R2 object.
-concurrency:
-  group: publish-torch-index-stacks
-  cancel-in-progress: false
-
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -51,20 +46,29 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     name: Publish to R2
-    # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions
-    # can reference it via the `env` context - `secrets` is not allowed in `if:`.
-    env:
-      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+    # Serialize publishes (also against the nightly refresh workflow, which
+    # shares this group) so two runs cannot race on the R2 object. Job-level
+    # so pull_request validate-only runs are not queued behind publishes.
+    concurrency:
+      group: publish-torch-index-stacks
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Upload manifest to R2
-        if: ${{ env.R2_BUCKET_NAME != '' }}
         env:
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
+          # This workflow exists to publish on merge - a missing secret must
+          # be loud, not a silently-skipped step under a green checkmark.
+          if [ -z "${R2_BUCKET_NAME}" ]; then
+            echo "::error::R2_BUCKET_NAME secret is not configured - manifest was NOT published"
+            exit 1
+          fi
           # Runner-provided AWS CLI - installing one at runtime would let a
           # compromised PyPI release run with publication credentials.
           aws --version
@@ -73,7 +77,7 @@ jobs:
           # propagate quickly through the Cloudflare edge.
           aws s3 cp torch-index-stacks.json \
             "s3://${R2_BUCKET_NAME}/standalone-environments/torch-index-stacks.json" \
-            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --endpoint-url "${R2_ENDPOINT}" \
             --content-type "application/json" \
             --cache-control "public, max-age=300"
           echo "Published torch-index-stacks.json to R2"

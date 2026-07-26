@@ -63,17 +63,26 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add torch-index-stacks.json
           git commit -m "chore: refresh nightly torch index stacks"
+          # A merge can land on main while resolve/validate run; rebase the
+          # snapshot so a non-fast-forward race does not fail the daily job.
+          git pull --rebase origin main
           git push origin main
 
-      # Upload runs whenever credentials are configured, not only when the
-      # manifest changed: if a previous run pushed the commit but the upload
-      # failed, the next run sees no diff and would otherwise never retry R2.
+      # Upload runs unconditionally, not only when the manifest changed: if
+      # a previous run pushed the commit but the upload failed, the next run
+      # sees no diff and would otherwise never retry R2.
       - name: Upload manifest to R2
-        if: ${{ env.R2_BUCKET_NAME != '' }}
         env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
+          # Publication is this workflow's whole point - a missing secret
+          # must be loud, not a silently-skipped step under a green check.
+          if [ -z "${R2_BUCKET_NAME}" ]; then
+            echo "::error::R2_BUCKET_NAME secret is not configured - refreshed manifest was NOT published"
+            exit 1
+          fi
           # Runner-provided AWS CLI - installing one at runtime would let a
           # compromised PyPI release run with publication credentials.
           aws --version
@@ -81,7 +90,7 @@ jobs:
           # in-place, short TTL so withdrawals and refreshes propagate.
           aws s3 cp torch-index-stacks.json \
             "s3://${R2_BUCKET_NAME}/standalone-environments/torch-index-stacks.json" \
-            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --endpoint-url "${R2_ENDPOINT}" \
             --content-type "application/json" \
             --cache-control "public, max-age=300"
           echo "Published refreshed torch-index-stacks.json to R2"

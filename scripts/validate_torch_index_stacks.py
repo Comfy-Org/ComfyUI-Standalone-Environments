@@ -20,6 +20,8 @@ import re
 import sys
 from datetime import datetime, timezone
 
+from nightly_policy import MAX_AGE_DAYS, NIGHTLY_TAGS
+
 SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # Package versions end up in pip `pkg==version` arguments - allowlist.
 SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+]*$")
@@ -30,17 +32,14 @@ DEV_RELEASE = re.compile(r"(\d|[._-])dev\d*$", re.IGNORECASE)
 # Nightly entries must use the dated spelling the refresh automation
 # publishes - the date is what the freshness gates key on.
 NIGHTLY_DEV = re.compile(r"\.dev(\d{8})$")
-# Publish-side freshness bound for nightly entries; keep in sync with
-# MAX_AGE_DAYS in refresh_nightly_stacks.py. (The app additionally stops
-# OFFERING an entry ~45 days after its wheel date, ahead of PyTorch's
-# ~60-day index purge.)
-NIGHTLY_MAX_AGE_DAYS = 7
-# Nightlies are offered per-tag deliberately; keep in sync with
-# NIGHTLY_TAGS in refresh_nightly_stacks.py (which also withdraws entries
-# for delisted tags on its next run - this check catches hand-added ones).
-NIGHTLY_TAGS = {"cu132"}
+# Publish-side freshness bound and tag allowlist come from the shared
+# nightly_policy module, so the refresher can never resolve an entry this
+# validator rejects in the same workflow run. The refresher also withdraws
+# entries for delisted tags on its next run; the allowlist check here
+# catches hand-added ones.
+NIGHTLY_MAX_AGE_DAYS = MAX_AGE_DAYS
 PYTHON_ABI = re.compile(r"^\d+\.\d+$")
-ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 ACCELS = {"nvidia", "amd", "intel-xpu", "cpu", "mps"}
 PLATFORMS = {"win32", "linux", "darwin"}

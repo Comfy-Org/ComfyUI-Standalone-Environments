@@ -14,7 +14,12 @@ editing this file - no app release needed.
   `scripts/validate_torch_index_stacks.py` (the app silently drops invalid
   entries, so validation runs here where a mistake fails loudly).
 - On merge to `main`, the `Publish Torch Index Stacks` workflow uploads it to
-  `standalone-environments/torch-index-stacks.json` on R2.
+  `standalone-environments/torch-index-stacks.json` on R2. The desktop app
+  also has a GCS fallback mirror that is synced outside this repository -
+  until that sync is automated
+  ([#10](https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/issues/10)),
+  fallback clients can serve a stale manifest after a withdrawal, so update
+  the mirror alongside urgent changes.
 - The desktop app validates entries default-deny at runtime; this file cannot
   point installs at arbitrary indexes.
 - An explicit empty `"stacks": []` withdraws every index-served stack from

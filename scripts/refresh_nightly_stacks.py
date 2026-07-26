@@ -22,22 +22,12 @@ import re
 import sys
 import urllib.request
 from datetime import date, datetime, timezone
+from urllib.parse import unquote
+
+from nightly_policy import MAX_AGE_DAYS, NIGHTLY_TAGS
 
 NIGHTLY_INDEX_BASE = "https://download.pytorch.org/whl/nightly"
 PACKAGES = ("torch", "torchvision", "torchaudio")
-
-# Index tags to offer nightlies for. NVIDIA covers the overwhelming
-# majority of users; add tags here deliberately (AMD Windows stays out -
-# pytorch.org publishes no Windows ROCm wheels, and mps has no dev builds
-# on PyPI). Every tag must be one the desktop app's runtime index gate
-# accepts (cu*/rocm*/xpu/cpu).
-NIGHTLY_TAGS = ("cu132",)
-
-# Refuse to publish a triple older than this: the publish-side freshness
-# gate in validate_torch_index_stacks.py enforces the same bound, and a
-# nightly index that has not produced a coherent triple for a week is a
-# problem a human should look at, not something to silently republish.
-MAX_AGE_DAYS = 7
 
 # name-version-pythontag-abitag-platformtag.whl (PEP 427); normalized
 # versions contain no dashes, so a plain split is unambiguous.
@@ -93,7 +83,9 @@ def parse_index(package, tag, html):
     """Parse a PEP 503 simple index page (see fetch_index)."""
     wheels = []
     for filename in ANCHOR_TEXT_RE.findall(html):
-        m = WHEEL_RE.match(filename)
+        # Anchor text may be percent-encoded (e.g. %2B for the + in the
+        # local version tag) depending on how the index page was rendered.
+        m = WHEEL_RE.match(unquote(filename))
         if not m:
             continue
         # A malformed index page must not smuggle another distribution's
@@ -129,7 +121,11 @@ def resolve_tag(tag, today):
     shared_dates = set.intersection(*(set(d) for d in by_pkg.values()))
     for day in sorted(shared_dates, reverse=True):
         iso = f"{day[0:4]}-{day[4:6]}-{day[6:8]}"
-        if (today - date.fromisoformat(iso)).days > MAX_AGE_DAYS:
+        try:
+            wheel_day = date.fromisoformat(iso)
+        except ValueError:
+            continue  # eight digits that are not a real calendar date
+        if (today - wheel_day).days > MAX_AGE_DAYS:
             break  # newest shared date is already too old - give up
         slots = {pkg: by_pkg[pkg][day] for pkg in PACKAGES}
         # exactly one version per package per date, or the date is ambiguous
