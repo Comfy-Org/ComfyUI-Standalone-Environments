@@ -165,6 +165,51 @@ class ValidatorExistingRules(unittest.TestCase):
         self.assertEqual(validator.main(str(manifest)), 0)
 
 
+def series_errors(series):
+    errors = []
+    validator.check_series(series, errors)
+    return errors
+
+
+class ValidatorSeriesRules(unittest.TestCase):
+    def test_valid_series_passes(self):
+        self.assertEqual(series_errors({
+            "cu130": {
+                "noteKey": "pytorchSeriesNoteCu130",
+                "note": "CUDA 13.0 - current stable line",
+                "minDriver": {"win32": "580.88", "linux": "580.65.06"},
+            },
+            "cpu": {"note": "CPU-only"},
+        }), [])
+
+    def test_non_object_series_fails(self):
+        self.assertTrue(series_errors(["cu130"]))
+
+    def test_unsafe_key_fails(self):
+        errs = series_errors({"cu 130": {"note": "x"}})
+        self.assertTrue(any("safe index-tag segment" in e for e in errs), errs)
+
+    def test_unknown_field_fails(self):
+        errs = series_errors({"cu130": {"note": "x", "minDrver": {"win32": "580"}}})
+        self.assertTrue(any("unknown fields" in e for e in errs), errs)
+
+    def test_unknown_platform_fails(self):
+        errs = series_errors({"cu130": {"minDriver": {"win64": "580"}}})
+        self.assertTrue(any("unknown platform" in e for e in errs), errs)
+
+    def test_non_numeric_driver_fails(self):
+        errs = series_errors({"cu130": {"minDriver": {"win32": "580.88; rm -rf"}}})
+        self.assertTrue(any("dotted numeric version" in e for e in errs), errs)
+
+    def test_empty_min_driver_fails(self):
+        errs = series_errors({"cu130": {"minDriver": {}}})
+        self.assertTrue(any("non-empty" in e for e in errs), errs)
+
+    def test_overlong_note_fails(self):
+        errs = series_errors({"cu130": {"note": "x" * 301}})
+        self.assertTrue(any("at most 300" in e for e in errs), errs)
+
+
 def wheel_anchor(name):
     return f'<a href="/whl/nightly/x/{name}">{name}</a><br/>'
 

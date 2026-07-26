@@ -1,5 +1,39 @@
 {
   "schemaVersion": 1,
+  "series": {
+    "cu126": {
+      "noteKey": "pytorchSeriesNoteCu126",
+      "note": "CUDA 12.6 - legacy line; keeps kernels for older GPUs (GTX 900/10-series and newer)",
+      "minDriver": { "win32": "527.41", "linux": "525.60.13" }
+    },
+    "cu128": {
+      "noteKey": "pytorchSeriesNoteCu128",
+      "note": "CUDA 12.8 - for RTX 20-series and newer without upgrading to a CUDA 13 driver",
+      "minDriver": { "win32": "527.41", "linux": "525.60.13" }
+    },
+    "cu130": {
+      "noteKey": "pytorchSeriesNoteCu130",
+      "note": "CUDA 13.0 - current stable CUDA line for RTX 20-series and newer",
+      "minDriver": { "win32": "580.88", "linux": "580.65.06" }
+    },
+    "cu132": {
+      "noteKey": "pytorchSeriesNoteCu132",
+      "note": "CUDA 13.2 - newest CUDA line, currently nightly builds only",
+      "minDriver": { "win32": "580.88", "linux": "580.65.06" }
+    },
+    "rocm7.1": {
+      "noteKey": "pytorchSeriesNoteRocm71",
+      "note": "AMD ROCm 7.1 - official PyTorch builds, Linux only"
+    },
+    "xpu": {
+      "noteKey": "pytorchSeriesNoteXpu",
+      "note": "Intel XPU - for Intel Arc and Core Ultra integrated GPUs"
+    },
+    "cpu": {
+      "noteKey": "pytorchSeriesNoteCpu",
+      "note": "CPU-only - no GPU acceleration; smallest download"
+    }
+  },
   "stacks": [
     {
       "indexTag": "cu126",

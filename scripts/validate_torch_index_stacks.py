@@ -230,6 +230,54 @@ def check_entry(i, r, errors):
         fail("note must be a plain string of at most 300 chars with no control characters")
 
 
+# Dotted numeric driver version (e.g. `580.88`, `525.60.13`) - compared
+# numerically segment by segment against the detected NVIDIA driver.
+DRIVER_VERSION = re.compile(r"^\d+(\.\d+)*$")
+SERIES_FIELDS = {"note", "noteKey", "minDriver"}
+
+
+def check_series(series, errors):
+    """Validate the optional top-level `series` map: per-index-tag display
+    metadata (note/noteKey) and the minimum NVIDIA driver the series'
+    wheels run on, keyed by platform. Strict at authoring time: unknown
+    fields fail here even though the app ignores them."""
+
+    def fail(key, msg):
+        errors.append(f"series[{key!r}]: {msg}")
+
+    if not isinstance(series, dict):
+        errors.append("series must be an object keyed by index tag")
+        return
+    for key, entry in series.items():
+        if not isinstance(key, str) or not SAFE_SEGMENT.match(key):
+            fail(key, "key must be a safe index-tag segment")
+            continue
+        if not isinstance(entry, dict):
+            fail(key, "entry must be an object")
+            continue
+        unknown = set(entry) - SERIES_FIELDS
+        if unknown:
+            fail(key, f"unknown fields {sorted(unknown)} (allowed: {sorted(SERIES_FIELDS)})")
+        note_key = entry.get("noteKey")
+        if note_key is not None and (not isinstance(note_key, str) or not SAFE_SEGMENT.match(note_key)):
+            fail(key, f"noteKey unsafe: {note_key!r}")
+        note = entry.get("note")
+        if note is not None and (
+            not isinstance(note, str) or len(note) > NOTE_MAX_LENGTH or CONTROL_CHARS.search(note)
+        ):
+            fail(key, "note must be a plain string of at most 300 chars with no control characters")
+        min_driver = entry.get("minDriver")
+        if min_driver is not None:
+            if not isinstance(min_driver, dict) or not min_driver:
+                fail(key, "minDriver must be a non-empty object keyed by platform")
+                continue
+            for plat, version in min_driver.items():
+                if plat not in PLATFORMS:
+                    fail(key, f"minDriver has unknown platform {plat!r} (must be one of {sorted(PLATFORMS)})")
+                if not isinstance(version, str) or not DRIVER_VERSION.match(version):
+                    fail(key, f"minDriver[{plat!r}] must be a dotted numeric version, got {version!r}")
+
+
 def main(path):
     with open(path, encoding="utf-8") as fh:
         try:
@@ -244,6 +292,8 @@ def main(path):
     else:
         if doc.get("schemaVersion") != 1:
             errors.append(f"schemaVersion must be 1, got {doc.get('schemaVersion')!r}")
+        if "series" in doc:
+            check_series(doc["series"], errors)
         stacks = doc.get("stacks")
         if not isinstance(stacks, list):
             errors.append("stacks must be an array")
