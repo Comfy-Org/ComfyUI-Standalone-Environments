@@ -36,3 +36,40 @@ editing this file - no app release needed.
   wheel date. The tag allowlist (`NIGHTLY_TAGS`, currently `cu132`) lives
   in the refresh script; old app versions ignore the nightly kind
   entirely.
+
+## Building and testing environments locally (no publishing)
+
+`scripts/build_local.py` reproduces the `Build Standalone Environment`
+workflow for one variant on your machine, and `scripts/serve_local.py`
+serves the result with the same URL layout as R2 so a dev desktop can
+ingest it. Nothing is uploaded anywhere.
+
+Prerequisites: Python 3, `git`, 7-Zip (`7z` on PATH, or the default
+Windows install location), network access, and tens of GB of free disk.
+Only variants matching the host OS can be built (pip resolves wheels for
+the running platform) - for other platforms, run the workflow via
+`workflow_dispatch` on a fork without R2 secrets, which skips every
+publish step and leaves the archives on the draft GitHub release.
+
+```powershell
+# 1. Build a variant (output lands in dist/<variant>/<tag>/)
+python scripts/build_local.py win-nvidia --comfyui-ref v0.4.61
+
+# 2. Generate R2-style metadata and serve dist/ on 127.0.0.1:8000.
+#    Also serves the working-tree torch-index-stacks.json, so local
+#    manifest edits are testable the same way.
+python scripts/serve_local.py
+
+# 3. Point an unpackaged desktop at it (packaged builds ignore this)
+cd ..\ComfyUI-Launcher
+$env:COMFY_STANDALONE_BASE_URL = 'http://127.0.0.1:8000'; pnpm dev
+```
+
+While the override is active the desktop's GCS mirror fallback is
+disabled, so a failure against the local server fails loudly instead of
+silently falling back to production metadata. Local builds default to a
+`<ref>-local1` tag; keep a `-local` suffix so a local artifact can never
+shadow a real release tag. Keep `build_local.py`'s constants in sync
+with the workflow matrix when it changes; `scripts/test_local_tooling.py`
+covers the metadata generation
+(`python -m unittest scripts.test_local_tooling`).
