@@ -1,0 +1,90 @@
+name: Publish Torch Index Stacks
+
+# Publishes torch-index-stacks.json to R2, where ComfyUI Desktop 2.0 fetches
+# it to populate the PyTorch picker with index-served stacks. Pull requests
+# only validate; pushes to main validate and publish. workflow_dispatch
+# republishes the checked-in file (e.g. after rotating the bucket).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - torch-index-stacks.json
+      - scripts/validate_torch_index_stacks.py
+      - scripts/refresh_nightly_stacks.py
+      - scripts/test_torch_index_scripts.py
+      - .github/workflows/publish-torch-index-stacks.yml
+  pull_request:
+    paths:
+      - torch-index-stacks.json
+      - scripts/validate_torch_index_stacks.py
+      - scripts/refresh_nightly_stacks.py
+      - scripts/test_torch_index_scripts.py
+      - .github/workflows/publish-torch-index-stacks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate manifest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          # Validation only reads the tree; no authenticated git operations.
+          persist-credentials: false
+
+      - name: Run script tests
+        run: python3 -m unittest scripts.test_torch_index_scripts -v
+
+      - name: Validate torch-index-stacks.json
+        run: python3 scripts/validate_torch_index_stacks.py torch-index-stacks.json
+
+  publish:
+    needs: validate
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    name: Publish to R2
+    # Serialize publishes (also against the nightly refresh workflow, which
+    # shares this group) so two runs cannot race on the R2 object. Job-level
+    # so pull_request validate-only runs are not queued behind publishes.
+    concurrency:
+      group: publish-torch-index-stacks
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          # The upload authenticates to R2 with its own secrets; the git
+          # token has no business persisting into the workspace.
+          persist-credentials: false
+
+      - name: Upload manifest to R2
+        env:
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # This workflow exists to publish on merge - a missing secret must
+          # be loud, not a silently-skipped step under a green checkmark.
+          if [ -z "${R2_BUCKET_NAME}" ]; then
+            echo "::error::R2_BUCKET_NAME secret is not configured - manifest was NOT published"
+            exit 1
+          fi
+          # Runner-provided AWS CLI - installing one at runtime would let a
+          # compromised PyPI release run with publication credentials.
+          aws --version
+          # Short cache TTL: unlike the immutable archives this object is
+          # replaced in-place, and stack WITHDRAWALS (explicit-empty) must
+          # propagate quickly through the Cloudflare edge.
+          aws s3 cp torch-index-stacks.json \
+            "s3://${R2_BUCKET_NAME}/standalone-environments/torch-index-stacks.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=300"
+          echo "Published torch-index-stacks.json to R2"

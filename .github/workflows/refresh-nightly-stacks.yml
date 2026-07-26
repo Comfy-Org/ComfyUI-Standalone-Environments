@@ -1,0 +1,99 @@
+name: Refresh Nightly Torch Stacks
+
+# Re-resolves the pytorch-nightly-index entries in torch-index-stacks.json
+# against the live nightly indexes, then commits and publishes the result.
+# Nightly wheels are purged from pytorch.org's index after roughly 60 days,
+# so these pins decay unless refreshed continuously. If this workflow stalls,
+# the desktop app stops OFFERING nightly entries ~45 days after their wheel
+# date (installed nightlies are unaffected) - failures here are not urgent,
+# but they should be looked at.
+#
+# Publishing happens here (not via the publish workflow) because commits
+# made with GITHUB_TOKEN do not trigger other workflows. The shared
+# concurrency group still serializes R2 writes against manual publishes.
+
+on:
+  schedule:
+    # :17 offset avoids the top-of-the-hour scheduler congestion, when
+    # GitHub-hosted cron runs are most likely to start late or be skipped.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-torch-index-stacks
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    # Never run the schedule on forks.
+    if: ${{ github.repository_owner == 'Comfy-Org' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    name: Refresh, validate, publish
+    env:
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+    steps:
+      - name: Checkout
+        # Credentials stay persisted: the commit step below pushes to main.
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: main
+
+      - name: Run script tests
+        run: python3 -m unittest scripts.test_torch_index_scripts -v
+
+      - name: Refresh nightly entries
+        run: python3 scripts/refresh_nightly_stacks.py torch-index-stacks.json
+
+      - name: Validate manifest
+        run: python3 scripts/validate_torch_index_stacks.py torch-index-stacks.json
+
+      - name: Detect changes
+        id: diff
+        run: |
+          if git diff --quiet torch-index-stacks.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit updated manifest
+        if: ${{ steps.diff.outputs.changed == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torch-index-stacks.json
+          git commit -m "chore: refresh nightly torch index stacks"
+          # A merge can land on main while resolve/validate run; rebase the
+          # snapshot so a non-fast-forward race does not fail the daily job.
+          git pull --rebase origin main
+          git push origin main
+
+      # Upload runs unconditionally, not only when the manifest changed: if
+      # a previous run pushed the commit but the upload failed, the next run
+      # sees no diff and would otherwise never retry R2.
+      - name: Upload manifest to R2
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # Publication is this workflow's whole point - a missing secret
+          # must be loud, not a silently-skipped step under a green check.
+          if [ -z "${R2_BUCKET_NAME}" ]; then
+            echo "::error::R2_BUCKET_NAME secret is not configured - refreshed manifest was NOT published"
+            exit 1
+          fi
+          # Runner-provided AWS CLI - installing one at runtime would let a
+          # compromised PyPI release run with publication credentials.
+          aws --version
+          # Same object and cache policy as the publish workflow: replaced
+          # in-place, short TTL so withdrawals and refreshes propagate.
+          aws s3 cp torch-index-stacks.json \
+            "s3://${R2_BUCKET_NAME}/standalone-environments/torch-index-stacks.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=300"
+          echo "Published refreshed torch-index-stacks.json to R2"
