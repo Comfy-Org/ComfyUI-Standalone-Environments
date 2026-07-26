@@ -1,12 +1,14 @@
-# AMD GPU requirements (ROCm)
+# AMD GPU requirements (ROCm 7.14, Linux)
 # Versions are pinned to prevent future pytorch releases from silently changing built environments.
 #
-# Note: This is for AMD GPUs with ROCm support.
-# For experimental Windows/Linux support on RDNA 3/3.5/4, see README.md
+# ROCm 7.14 ships via AMD's TheRock multi-arch wheel index, which serves both
+# Linux and Windows from the same URL. The [device-all] extra pulls in the
+# matching ROCm device libraries for all supported GPU architectures, so no
+# separate rocm-sdk pins are needed.
 
---index-url https://download.pytorch.org/whl/rocm7.1
+--index-url https://repo.amd.com/rocm/whl-multi-arch/
 --extra-index-url https://pypi.org/simple
 
-torch==2.10.0+rocm7.1
-torchvision==0.25.0+rocm7.1
-torchaudio==2.10.0+rocm7.1
+torch[device-all]==2.10.0+rocm7.14.0
+torchvision[device-all]==0.25.0+rocm7.14.0
+torchaudio==2.10.0+rocm7.14.0
