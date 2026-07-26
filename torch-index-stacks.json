@@ -6,6 +6,20 @@
       "accel": "nvidia",
       "platforms": ["win32", "linux"],
       "packages": {
+        "torch": "2.9.1+cu126",
+        "torchvision": "0.24.1+cu126",
+        "torchaudio": "2.9.1+cu126"
+      },
+      "date": "2025-11-12",
+      "computeCap": { "min": 5.0, "max": 9.0 },
+      "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
+      "noteKey": "pytorchIndexNoteCu126"
+    },
+    {
+      "indexTag": "cu126",
+      "accel": "nvidia",
+      "platforms": ["win32", "linux"],
+      "packages": {
         "torch": "2.11.0+cu126",
         "torchvision": "0.26.0+cu126",
         "torchaudio": "2.11.0+cu126"
