@@ -34,7 +34,8 @@ jobs:
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # Credentials stay persisted: the commit step below pushes to main.
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           ref: main
 

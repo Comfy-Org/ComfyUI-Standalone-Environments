@@ -33,7 +33,10 @@ jobs:
     name: Validate manifest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          # Validation only reads the tree; no authenticated git operations.
+          persist-credentials: false
 
       - name: Run script tests
         run: python3 -m unittest scripts.test_torch_index_scripts -v
@@ -54,7 +57,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          # The upload authenticates to R2 with its own secrets; the git
+          # token has no business persisting into the workspace.
+          persist-credentials: false
 
       - name: Upload manifest to R2
         env:
