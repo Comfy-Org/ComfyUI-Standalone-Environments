@@ -44,6 +44,14 @@ CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 ACCELS = {"nvidia", "amd", "intel-xpu", "cpu", "mps"}
 PLATFORMS = {"win32", "linux", "darwin"}
 NOTE_MAX_LENGTH = 300
+# Strict at authoring time, like SERIES_FIELDS: the app ignores unknown
+# entry fields, but nothing unknown should ever be committed - especially
+# not URL-shaped fields, since every install source must stay a trusted
+# constant in the app, never manifest-supplied.
+ENTRY_FIELDS = {
+    "kind", "indexTag", "accel", "platforms", "packages",
+    "date", "computeCap", "pythonAbis", "noteKey", "note",
+}
 
 
 def local_tag(version):
@@ -65,6 +73,10 @@ def check_entry(i, r, errors):
         fail("entry is not an object")
         return
 
+    unknown = set(r) - ENTRY_FIELDS
+    if unknown:
+        fail(f"unknown fields {sorted(unknown)} (allowed: {sorted(ENTRY_FIELDS)})")
+
     index_tag = r.get("indexTag")
     if not isinstance(index_tag, str) or not SAFE_SEGMENT.match(index_tag):
         fail(f"indexTag missing or unsafe: {index_tag!r}")
@@ -76,10 +88,17 @@ def check_entry(i, r, errors):
         return
 
     # `kind` must match a mechanism the app has: the stable kind derived
-    # from the accelerator, or `pytorch-nightly-index` for dev tuples
-    # (never for mps - PyPI serves no dev builds).
+    # from the accelerator, `amd-multi-arch-index` for stable AMD tuples
+    # served from AMD's TheRock multi-arch index (which publishes Windows
+    # AND Linux wheels), or `pytorch-nightly-index` for dev tuples (never
+    # for mps - PyPI serves no dev builds). App versions without a kind's
+    # mechanism drop its entries instead of misapplying them.
     expected_kind = "pypi" if accel == "mps" else "pytorch-index"
     nightly = r.get("kind") == "pytorch-nightly-index"
+    amd_multi_arch = r.get("kind") == "amd-multi-arch-index"
+    if amd_multi_arch and accel != "amd":
+        fail(f"kind 'amd-multi-arch-index' requires accel 'amd', got {accel!r}")
+        return
     if nightly and accel == "mps":
         fail("mps entries cannot be nightly (PyPI serves no dev builds)")
         return
@@ -88,7 +107,7 @@ def check_entry(i, r, errors):
             f"nightly indexTag {index_tag!r} is not offered (allowed: {sorted(NIGHTLY_TAGS)}) - "
             "nightly entries are managed by scripts/refresh_nightly_stacks.py, not hand-edited"
         )
-    if not nightly and "kind" in r and r["kind"] != expected_kind:
+    if not nightly and not amd_multi_arch and "kind" in r and r["kind"] != expected_kind:
         fail(f"kind must be {expected_kind!r} for accel {accel!r} (or omitted), got {r['kind']!r}")
 
     platforms = r.get("platforms")
@@ -182,10 +201,11 @@ def check_entry(i, r, errors):
     elif torch_tag != index_tag:
         fail(f"torch local tag {torch_tag!r} does not match indexTag {index_tag!r}")
 
-    # pytorch.org publishes no Windows ROCm wheels; AMD's SDK channel is not
-    # a mechanism schema 1 can express.
-    if accel == "amd" and "win32" in platforms:
-        fail("amd stacks cannot target win32 in schema 1 (no Windows ROCm wheels on pytorch.org)")
+    # pytorch.org publishes no Windows ROCm wheels, so plain pytorch-index
+    # amd entries stay Linux-only. `amd-multi-arch-index` entries install
+    # from AMD's TheRock multi-arch index, which serves win32 and linux.
+    if accel == "amd" and "win32" in platforms and not amd_multi_arch:
+        fail("amd pytorch-index stacks cannot target win32 (no Windows ROCm wheels on pytorch.org); use kind 'amd-multi-arch-index'")
 
     # Companion packages install from the same index - same tag (or none).
     for opt in ("torchvision", "torchaudio"):
