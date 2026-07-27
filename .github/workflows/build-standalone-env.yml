@@ -45,12 +45,12 @@ jobs:
             os: windows-latest
             python_platform: x86_64-pc-windows-msvc
             vendor_requirements: requirements-intel.txt
-          # AMD universal ROCm 7.2.1 package only provides Python 3.12 wheels
+          # ROCm 7.14 multi-arch wheels cover Python 3.10-3.14, so win-amd
+          # uses the workspace default Python like every other variant.
           - id: win-amd
             os: windows-latest
             python_platform: x86_64-pc-windows-msvc
             vendor_requirements: requirements-amd-win.txt
-            python_version: "3.12.12"
           - id: win-cpu
             os: windows-latest
             python_platform: x86_64-pc-windows-msvc

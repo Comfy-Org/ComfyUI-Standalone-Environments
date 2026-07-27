@@ -1,13 +1,16 @@
-# AMD GPU requirements (ROCm 7.2.1, Windows)
-# Uses the universal ROCm package from AMD, which requires Python 3.12.
+# AMD GPU requirements (ROCm 7.14, Windows)
 # Versions are pinned to prevent pip from preferring newer CPU-only wheels from PyPI.
+#
+# ROCm 7.14 ships via AMD's TheRock multi-arch wheel index, which serves both
+# Windows and Linux from the same URL - the old repo.radeon.com universal
+# package (last: rocm-rel-7.2.1, Python 3.12 only) is no longer used. Wheels
+# cover Python 3.10-3.14, so this build now uses the workspace default
+# Python instead of a pinned 3.12. The [device-all] extra pulls in the
+# matching ROCm device libraries for all supported GPU architectures.
 
---find-links https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/
+--index-url https://repo.amd.com/rocm/whl-multi-arch/
+--extra-index-url https://pypi.org/simple
 
-rocm-sdk-core==7.2.1
-rocm-sdk-devel==7.2.1
-rocm-sdk-libraries-custom==7.2.1
-rocm==7.2.1
-torch==2.9.1+rocm7.2.1
-torchvision==0.24.1+rocm7.2.1
-torchaudio==2.9.1+rocm7.2.1
+torch[device-all]==2.10.0+rocm7.14.0
+torchvision[device-all]==0.25.0+rocm7.14.0
+torchaudio==2.10.0+rocm7.14.0
