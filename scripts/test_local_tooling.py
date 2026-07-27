@@ -67,12 +67,15 @@ class SafeTag(unittest.TestCase):
 
 
 class VariantPythonVersion(unittest.TestCase):
-    def test_win_amd_matrix_override(self):
-        # The workflow matrix pins win-amd to 3.12 (universal ROCm wheels).
-        self.assertEqual(build_local.variant_python_version("win-amd"), "3.12.12")
+    def test_overrides_win_over_default(self):
+        try:
+            build_local.VARIANT_PYTHON_VERSIONS["win-amd"] = "3.12.12"
+            self.assertEqual(build_local.variant_python_version("win-amd"), "3.12.12")
+        finally:
+            del build_local.VARIANT_PYTHON_VERSIONS["win-amd"]
 
-    def test_other_variants_use_workflow_default(self):
-        for v in ["win-nvidia", "linux-amd", "mac-mps"]:
+    def test_variants_without_override_use_workflow_default(self):
+        for v in ["win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
             self.assertEqual(build_local.variant_python_version(v),
                              build_local.PYTHON_VERSION)
 
@@ -145,7 +148,7 @@ class BuildManifest(unittest.TestCase):
         self.assertEqual(m["archive_base"], "comfyui-standalone-win-amd-v0.4.61-env2")
         # CI archives the manifest before populating the files list.
         self.assertEqual(m["files"], [])
-        self.assertEqual(m["python_version"], "3.12.12")
+        self.assertEqual(m["python_version"], build_local.PYTHON_VERSION)
         self.assertEqual(m["vendor_requirements_content"], "torch")
         # ISO-8601 Zulu, same format string as the workflow's `date -u`.
         self.assertRegex(m["build_date"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")

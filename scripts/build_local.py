@@ -42,11 +42,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON_VERSION = "3.13.12"
 PBS_RELEASE = "20260211"
 
-# Per-variant python_version overrides from the matrix (win-amd's universal
-# ROCm 7.2.1 package only ships Python 3.12 wheels).
-VARIANT_PYTHON_VERSIONS = {
-    "win-amd": "3.12.12",
-}
+# Per-variant python_version overrides from the matrix (currently none;
+# e.g. win-amd was pinned to 3.12 while on the universal ROCm 7.2.1 wheels).
+VARIANT_PYTHON_VERSIONS = {}
 
 PYTHON_PLATFORMS = {
     "win": "x86_64-pc-windows-msvc",
