@@ -1,0 +1,41 @@
+name: Test Local Build Tooling
+
+# Runs the unit tests for the local build/serve developer tooling. These
+# scripts publish nothing; this workflow only keeps their metadata
+# generation honest against the shapes the desktop app expects.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/build_local.py
+      - scripts/serve_local.py
+      - scripts/test_local_tooling.py
+      # Parity tests compare build_local.py constants to the CI matrix.
+      - .github/workflows/build-standalone-env.yml
+      - .github/workflows/test-local-tooling.yml
+  pull_request:
+    paths:
+      - scripts/build_local.py
+      - scripts/serve_local.py
+      - scripts/test_local_tooling.py
+      - .github/workflows/build-standalone-env.yml
+      - .github/workflows/test-local-tooling.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Run tooling tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          # Tests only read the tree; no authenticated git operations.
+          persist-credentials: false
+
+      - name: Run local tooling tests
+        run: python3 -m unittest scripts.test_local_tooling -v

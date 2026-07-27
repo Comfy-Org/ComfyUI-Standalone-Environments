@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Local build tooling output (scripts/build_local.py, scripts/serve_local.py)
+build/
+dist/
