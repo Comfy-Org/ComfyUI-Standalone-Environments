@@ -320,19 +320,6 @@
       "accel": "intel-xpu",
       "platforms": ["win32", "linux"],
       "packages": {
-        "torch": "2.9.1+xpu",
-        "torchvision": "0.24.1+xpu",
-        "torchaudio": "2.9.1+xpu"
-      },
-      "date": "2025-11-12",
-      "pythonAbis": ["3.10", "3.11", "3.12", "3.13", "3.14"],
-      "noteKey": "pytorchIndexNoteXpu"
-    },
-    {
-      "indexTag": "xpu",
-      "accel": "intel-xpu",
-      "platforms": ["win32", "linux"],
-      "packages": {
         "torch": "2.10.0+xpu",
         "torchvision": "0.25.0+xpu",
         "torchaudio": "2.10.0+xpu"
