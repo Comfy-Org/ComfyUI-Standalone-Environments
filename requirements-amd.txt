@@ -9,6 +9,6 @@
 --index-url https://repo.amd.com/rocm/whl-multi-arch/
 --extra-index-url https://pypi.org/simple
 
-torch[device-all]==2.11.0+rocm7.14.0
-torchvision[device-all]==0.26.0+rocm7.14.0
+torch[device-all]==2.12.0+rocm7.14.0
+torchvision[device-all]==0.27.0+rocm7.14.0
 torchaudio==2.11.0+rocm7.14.0
