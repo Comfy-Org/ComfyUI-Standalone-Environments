@@ -282,8 +282,12 @@ jobs:
           find standalone-env -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
           find standalone-env -name "*.pyc" -delete 2>/dev/null || true
 
-          # Strip debug symbols from shared libraries (Linux/Mac)
-          if [[ "${{ runner.os }}" != "Windows" ]]; then
+          # Strip debug symbols from shared libraries (Linux/Mac).
+          # Skip the AMD multi-arch ROCm wheels: strip rewrites their ELF
+          # segments and breaks page alignment, after which torch fails to
+          # import ("libtorch_hip.so: ELF load command address/offset not
+          # page-aligned").
+          if [[ "${{ runner.os }}" != "Windows" && "${{ matrix.vendor_requirements }}" != "requirements-amd.txt" ]]; then
             find standalone-env -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
             find standalone-env -name "*.dylib" -exec strip -x {} \; 2>/dev/null || true
           fi
