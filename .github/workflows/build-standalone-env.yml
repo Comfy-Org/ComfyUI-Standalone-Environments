@@ -635,11 +635,18 @@ jobs:
               --endpoint-url "$R2_ENDPOINT"
           done
 
-          # Build latest.json: newest release per vendor
+          # Build latest.json: newest release per vendor. Merge into the
+          # existing latest.json so a partial-matrix run (e.g. rebuilding only
+          # the AMD variants) does not drop the vendors it didn't build.
+          aws s3 cp "${R2_BASE}/latest.json" existing-latest.json \
+            --endpoint-url "$R2_ENDPOINT" 2>/dev/null || echo '{}' > existing-latest.json
+
           python3 -c "
           import json, glob
 
-          latest = {}
+          with open('existing-latest.json') as fh:
+              latest = json.load(fh)
+
           for f in sorted(glob.glob('upload-*.json')):
               vendor_id = f.replace('upload-', '').replace('.json', '')
               with open(f) as fh:
