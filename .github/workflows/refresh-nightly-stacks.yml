@@ -11,6 +11,11 @@ name: Refresh Nightly Torch Stacks
 # Publishing happens here (not via the publish workflow) because commits
 # made with GITHUB_TOKEN do not trigger other workflows. The shared
 # concurrency group still serializes R2 writes against manual publishes.
+#
+# R2 is published directly from this run's refreshed working tree; main is
+# synced afterwards through a rolling PR because branch protection rejects
+# direct pushes to main. Until that PR merges, main lags what is live on R2 -
+# that is fine, the desktop reads R2, not the repo.
 
 on:
   schedule:
@@ -21,6 +26,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: publish-torch-index-stacks
@@ -36,7 +42,7 @@ jobs:
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
     steps:
       - name: Checkout
-        # Credentials stay persisted: the commit step below pushes to main.
+        # Credentials stay persisted: the PR step below pushes a branch.
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           ref: main
@@ -59,17 +65,32 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit updated manifest
+      - name: Commit updated manifest and open a PR
         if: ${{ steps.diff.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # One rolling branch: a force-push replaces any unmerged previous
+          # refresh, since a newer resolve always supersedes an older one.
+          branch="bot/refresh-nightly-stacks"
+          git checkout -B "$branch"
           git add torch-index-stacks.json
           git commit -m "chore: refresh nightly torch index stacks"
-          # A merge can land on main while resolve/validate run; rebase the
-          # snapshot so a non-fast-forward race does not fail the daily job.
-          git pull --rebase origin main
-          git push origin main
+          git push --force origin "$branch"
+          # Reuse the open PR if one exists; otherwise create it. PRs opened
+          # with GITHUB_TOKEN do not trigger pull_request CI - close/reopen
+          # the PR to run checks if branch protection requires them. R2 was
+          # already validated and published by this run either way.
+          existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$existing" ]; then
+            gh pr create --base main --head "$branch" \
+              --title "chore: refresh nightly torch index stacks" \
+              --body "Automated nightly refresh of pytorch-nightly-index entries. The refreshed manifest passed validation and has already been published to R2 by the scheduled workflow; merging this PR syncs main with what is live."
+          else
+            echo "Updated existing PR #$existing"
+          fi
 
       # Upload runs unconditionally, not only when the manifest changed: if
       # a previous run pushed the commit but the upload failed, the next run
