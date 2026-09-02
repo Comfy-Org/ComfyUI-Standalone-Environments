@@ -101,6 +101,13 @@ jobs:
       - name: Install native build tools
         run: python -m pip install --upgrade cmake ninja
 
+      # v0.1.14's Cargo.lock pins generator 0.8.8 (via loom, kiddo), which has
+      # no aarch64-windows backend and fails to compile. 0.8.9 (2026-06-01)
+      # added it and is what upstream main locks. Patch-level bump of one
+      # transitive crate; the kornia-rs sources stay at the release tag.
+      - name: Bump generator crate for Windows ARM64 support
+        run: cargo update -p generator --precise 0.8.9
+
       - uses: PyO3/maturin-action@v1
         with:
           command: build
