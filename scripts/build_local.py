@@ -46,13 +46,8 @@ PBS_RELEASE = "20260211"
 # e.g. win-amd was pinned to 3.12 while on the universal ROCm 7.2.1 wheels).
 VARIANT_PYTHON_VERSIONS = {}
 
-PYTHON_PLATFORMS = {
-    "win": "x86_64-pc-windows-msvc",
-    "linux": "x86_64-unknown-linux-gnu",
-    "mac": "aarch64-apple-darwin",
-}
-
 VARIANTS = {
+    "win-nvidia-arm64": "requirements-nvidia-arm64.txt",
     "win-nvidia": "requirements-nvidia.txt",
     "win-intel-xpu": "requirements-intel.txt",
     "win-amd": "requirements-amd-win.txt",
@@ -63,11 +58,37 @@ VARIANTS = {
     "mac-mps": "requirements-mac.txt",
 }
 
+PYTHON_PLATFORMS = {
+    "win-nvidia-arm64": "aarch64-pc-windows-msvc",
+    "win-nvidia": "x86_64-pc-windows-msvc",
+    "win-intel-xpu": "x86_64-pc-windows-msvc",
+    "win-amd": "x86_64-pc-windows-msvc",
+    "win-cpu": "x86_64-pc-windows-msvc",
+    "linux-nvidia": "x86_64-unknown-linux-gnu",
+    "linux-amd": "x86_64-unknown-linux-gnu",
+    "linux-intel-xpu": "x86_64-unknown-linux-gnu",
+    "mac-mps": "aarch64-apple-darwin",
+}
+
 HOST_OS = {"win32": "win", "linux": "linux", "darwin": "mac"}.get(sys.platform)
 
-# PYTHON_PLATFORMS above pins the CPU architecture per OS; a host with a
+# PYTHON_PLATFORMS above pins the CPU architecture per variant; a host with a
 # different machine type would silently get a foreign-arch environment.
-HOST_ARCHES = {"win": {"AMD64"}, "linux": {"x86_64"}, "mac": {"arm64"}}
+HOST_ARCHES = {
+    "aarch64-pc-windows-msvc": {"ARM64", "aarch64"},
+    "x86_64-pc-windows-msvc": {"AMD64", "x86_64"},
+    "x86_64-unknown-linux-gnu": {"x86_64"},
+    "aarch64-apple-darwin": {"arm64"},
+}
+
+WINDOWS_ARM64_WHEEL_RELEASE = (
+    "https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/"
+    "releases/download/win-arm64-wheels-v1"
+)
+WINDOWS_ARM64_WHEELS = (
+    "blake3-1.0.9-cp313-cp313-win_arm64.whl",
+    "kornia_rs-0.1.14-cp313-cp313-win_arm64.whl",
+)
 
 # Keep in sync with SAFE_SEGMENT in serve_local.py / r2Catalog.ts: the tag
 # becomes a path segment in the served URL and the archive filename.
@@ -152,9 +173,9 @@ def env_python(env_dir):
     return env_dir / ("python.exe" if HOST_OS == "win" else "bin/python3")
 
 
-def fetch_python_standalone(work, python_version):
-    platform = PYTHON_PLATFORMS[HOST_OS]
-    name = f"cpython-{python_version}+{PBS_RELEASE}-{platform}-install_only.tar.gz"
+def fetch_python_standalone(work, variant, python_version):
+    python_platform = PYTHON_PLATFORMS[variant]
+    name = f"cpython-{python_version}+{PBS_RELEASE}-{python_platform}-install_only.tar.gz"
     url = f"https://github.com/astral-sh/python-build-standalone/releases/download/{PBS_RELEASE}/{name}"
     tarball = work / "python-standalone.tar.gz"
     download(url, tarball)
@@ -171,7 +192,7 @@ def clone_comfyui(work, ref):
          "https://github.com/Comfy-Org/ComfyUI.git", str(work / "ComfyUI")])
 
 
-def install_requirements(work, vendor_req_name):
+def install_requirements(work, variant, vendor_req_name):
     final = work / "requirements_final.txt"
     vendor = (REPO_ROOT / vendor_req_name).read_text(encoding="utf-8")
     final.write_text(
@@ -185,15 +206,22 @@ def install_requirements(work, vendor_req_name):
     subprocess.run([str(python), "-m", "ensurepip", "--upgrade"], check=False,
                    capture_output=True)
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=work)
+    if PYTHON_PLATFORMS[variant] == "aarch64-pc-windows-msvc":
+        wheel_urls = [f"{WINDOWS_ARM64_WHEEL_RELEASE}/{name}"
+                      for name in WINDOWS_ARM64_WHEELS]
+        run([str(python), "-m", "pip", "install", "--no-cache-dir",
+             *wheel_urls], cwd=work)
     run([str(python), "-m", "pip", "install", "--no-cache-dir",
          "-r", "requirements_final.txt", "pygit2"], cwd=work)
 
 
-def bundle_uv(work):
+def bundle_uv(work, variant):
     env = work / "standalone-env"
     base = "https://github.com/astral-sh/uv/releases/latest/download"
     if HOST_OS == "win":
-        download(f"{base}/uv-x86_64-pc-windows-msvc.zip", work / "uv.zip")
+        uv_arch = ("aarch64" if PYTHON_PLATFORMS[variant].startswith("aarch64-")
+                   else "x86_64")
+        download(f"{base}/uv-{uv_arch}-pc-windows-msvc.zip", work / "uv.zip")
         import zipfile
         with zipfile.ZipFile(work / "uv.zip") as zf:
             with zf.open("uv.exe") as src, open(env / "uv.exe", "wb") as dst:
@@ -244,7 +272,7 @@ def strip_environment(work):
                            shell=True, check=False)
 
 
-def smoke_test(work):
+def smoke_test(work, variant):
     python = env_python(work / "standalone-env")
     run([str(python), "-c",
          "import torch; print('torch', torch.__version__);"
@@ -252,6 +280,12 @@ def smoke_test(work):
          "import transformers; print('transformers', transformers.__version__);"
          "import pygit2; print('pygit2', pygit2.__version__);"
          "print('All core imports OK')"], cwd=work)
+    if PYTHON_PLATFORMS[variant] == "aarch64-pc-windows-msvc":
+        run([str(python), "-c",
+             "import importlib.metadata, blake3, kornia_rs;"
+             "assert blake3.__version__ == '1.0.9';"
+             "assert importlib.metadata.version('kornia-rs') == '0.1.14';"
+             "print('blake3 and kornia-rs ARM64 imports OK')"], cwd=work)
 
 
 def introspect_versions(work, uv_bin):
@@ -313,9 +347,10 @@ def main():
         raise SystemExit(
             f"{args.variant} cannot be built on this host (pip resolves wheels for the"
             " running platform). Use workflow_dispatch on a fork for other platforms.")
-    if platform.machine() not in HOST_ARCHES[HOST_OS]:
+    python_platform = PYTHON_PLATFORMS[args.variant]
+    if platform.machine() not in HOST_ARCHES[python_platform]:
         raise SystemExit(
-            f"{args.variant} targets {PYTHON_PLATFORMS[HOST_OS]} but this machine is"
+            f"{args.variant} targets {python_platform} but this machine is"
             f" {platform.machine()}")
 
     ref = args.comfyui_ref or resolve_latest_comfyui_ref()
@@ -333,12 +368,12 @@ def main():
     work.mkdir(parents=True)
 
     vendor_req_name = VARIANTS[args.variant]
-    fetch_python_standalone(work, variant_python_version(args.variant))
+    fetch_python_standalone(work, args.variant, variant_python_version(args.variant))
     clone_comfyui(work, ref)
-    install_requirements(work, vendor_req_name)
-    uv_bin = bundle_uv(work)
+    install_requirements(work, args.variant, vendor_req_name)
+    uv_bin = bundle_uv(work, args.variant)
     strip_environment(work)
-    smoke_test(work)
+    smoke_test(work, args.variant)
 
     commit = run(["git", "-C", str(work / "ComfyUI"), "rev-parse", "HEAD"],
                  capture_output=True, text=True).stdout.strip()

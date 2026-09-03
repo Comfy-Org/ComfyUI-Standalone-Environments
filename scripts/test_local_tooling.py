@@ -75,7 +75,7 @@ class VariantPythonVersion(unittest.TestCase):
             del build_local.VARIANT_PYTHON_VERSIONS["win-amd"]
 
     def test_variants_without_override_use_workflow_default(self):
-        for v in ["win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
+        for v in ["win-nvidia-arm64", "win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
             self.assertEqual(build_local.variant_python_version(v),
                              build_local.PYTHON_VERSION)
 
@@ -110,6 +110,12 @@ class WorkflowParity(unittest.TestCase):
             m = re.search(r"^\s+vendor_requirements: (\S+)$", block, re.M)
             self.assertIsNotNone(m, vid)
             self.assertEqual(m.group(1), build_local.VARIANTS[vid], vid)
+
+    def test_python_platforms_match_matrix(self):
+        for vid, block in self.entries.items():
+            m = re.search(r"^\s+python_platform: (\S+)$", block, re.M)
+            self.assertIsNotNone(m, vid)
+            self.assertEqual(m.group(1), build_local.PYTHON_PLATFORMS[vid], vid)
 
     def test_python_version_overrides_match_matrix(self):
         overrides = {}

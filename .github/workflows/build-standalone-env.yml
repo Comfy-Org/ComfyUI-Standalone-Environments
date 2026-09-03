@@ -29,6 +29,10 @@ jobs:
       matrix:
         include:
           # Windows
+          - id: win-nvidia-arm64
+            os: windows-11-arm
+            python_platform: aarch64-pc-windows-msvc
+            vendor_requirements: requirements-nvidia-arm64.txt
           - id: win-nvidia
             os: windows-latest
             python_platform: x86_64-pc-windows-msvc
@@ -216,13 +220,29 @@ jobs:
 
           "$PYTHON" -m ensurepip --upgrade 2>/dev/null || true
           "$PYTHON" -m pip install --upgrade pip
+
+          # ComfyUI requires these native Rust extensions, but neither package
+          # publishes a Windows ARM64 wheel on PyPI yet. Install the verified
+          # wheels from win-arm64-wheels-v1 first so the later unpinned
+          # requirements resolve to these already-installed versions.
+          if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
+            WHEEL_RELEASE="https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/releases/download/win-arm64-wheels-v1"
+            "$PYTHON" -m pip install --no-cache-dir \
+              "$WHEEL_RELEASE/blake3-1.0.9-cp313-cp313-win_arm64.whl" \
+              "$WHEEL_RELEASE/kornia_rs-0.1.14-cp313-cp313-win_arm64.whl"
+          fi
+
           "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2
 
       - name: Bundle uv
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            UV_ARCHIVE="uv-x86_64-pc-windows-msvc.zip"
+            if [[ "${{ runner.arch }}" == "ARM64" ]]; then
+              UV_ARCHIVE="uv-aarch64-pc-windows-msvc.zip"
+            else
+              UV_ARCHIVE="uv-x86_64-pc-windows-msvc.zip"
+            fi
             curl -L -o uv.zip "https://github.com/astral-sh/uv/releases/latest/download/${UV_ARCHIVE}"
             unzip uv.zip -d uv-extract
             cp uv-extract/uv.exe standalone-env/
@@ -318,6 +338,18 @@ jobs:
           print(f'pygit2 {pygit2.__version__}')
           print('All core imports OK')
           "
+
+          if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
+            echo "=== Verifying hosted Windows ARM64 wheels ==="
+            "$PYTHON" -c "
+          import importlib.metadata
+          import blake3
+          import kornia_rs
+          assert blake3.__version__ == '1.0.9', blake3.__version__
+          assert importlib.metadata.version('kornia-rs') == '0.1.14'
+          print('blake3 and kornia-rs ARM64 imports OK')
+          "
+          fi
 
       - name: Generate build manifest
         shell: bash
