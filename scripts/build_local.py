@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import platform
 import re
@@ -89,6 +90,7 @@ WINDOWS_ARM64_WHEELS = (
     "blake3-1.0.9-cp313-cp313-win_arm64.whl",
     "kornia_rs-0.1.14-cp313-cp313-win_arm64.whl",
 )
+WINDOWS_ARM64_WHEEL_CHECKSUMS = REPO_ROOT / "win-arm64-wheels.sha256"
 
 # Keep in sync with SAFE_SEGMENT in serve_local.py / r2Catalog.ts: the tag
 # becomes a path segment in the served URL and the archive filename.
@@ -159,6 +161,26 @@ def download(url, dest):
         shutil.copyfileobj(resp, fh)
 
 
+def load_sha256_checksums(path):
+    checksums = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        digest, filename = line.split(maxsplit=1)
+        checksums[filename] = digest
+    return checksums
+
+
+def verify_sha256(path, expected):
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise SystemExit(
+            f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
+        )
+
+
 def resolve_latest_comfyui_ref():
     url = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
     with urllib.request.urlopen(url) as resp:
@@ -207,10 +229,15 @@ def install_requirements(work, variant, vendor_req_name):
                    capture_output=True)
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=work)
     if PYTHON_PLATFORMS[variant] == "aarch64-pc-windows-msvc":
-        wheel_urls = [f"{WINDOWS_ARM64_WHEEL_RELEASE}/{name}"
-                      for name in WINDOWS_ARM64_WHEELS]
+        checksums = load_sha256_checksums(WINDOWS_ARM64_WHEEL_CHECKSUMS)
+        wheel_paths = []
+        for name in WINDOWS_ARM64_WHEELS:
+            wheel = work / name
+            download(f"{WINDOWS_ARM64_WHEEL_RELEASE}/{name}", wheel)
+            verify_sha256(wheel, checksums[name])
+            wheel_paths.append(str(wheel))
         run([str(python), "-m", "pip", "install", "--no-cache-dir",
-             *wheel_urls], cwd=work)
+             *wheel_paths], cwd=work)
     run([str(python), "-m", "pip", "install", "--no-cache-dir",
          "-r", "requirements_final.txt", "pygit2"], cwd=work)
 
