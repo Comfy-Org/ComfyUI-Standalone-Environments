@@ -179,7 +179,8 @@ class WorkflowParity(unittest.TestCase):
         self.assertIn(" ".join(build_local.SEVENZ_ARGS), self.text)
 
     def test_arm64_wheel_checksum_manifest_is_verified(self):
-        self.assertIn("sha256sum -c ../win-arm64-wheels.sha256", self.text)
+        self.assertIn("sha256sum -c checksums.sha256", self.text)
+        self.assertIn("tr -d '\\r' < win-arm64-wheels.sha256", self.text)
 
 
 class ArchiveFilename(unittest.TestCase):
