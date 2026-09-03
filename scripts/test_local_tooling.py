@@ -80,6 +80,33 @@ class VariantPythonVersion(unittest.TestCase):
                              build_local.PYTHON_VERSION)
 
 
+class WindowsArm64Requirements(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = (Path(__file__).resolve().parent.parent
+                / "requirements-nvidia-arm64.txt")
+        cls.text = path.read_text(encoding="utf-8")
+
+    def test_nvidia_nightlies_share_date_and_cuda_version(self):
+        pins = {
+            package: (date, cuda)
+            for package, date, cuda in re.findall(
+                r"^(torch|torchvision|torchaudio)==[^\n]*dev(\d{8})\+(cu\d+)$",
+                self.text,
+                re.M,
+            )
+        }
+        self.assertEqual(set(pins), {"torch", "torchvision", "torchaudio"})
+        self.assertEqual(len({date for date, _ in pins.values()}), 1)
+        self.assertEqual({cuda for _, cuda in pins.values()}, {"cu134"})
+
+    def test_prereleases_are_not_enabled_for_all_comfyui_dependencies(self):
+        self.assertNotRegex(self.text, r"(?m)^\s*--pre\s*$")
+
+    def test_cryptography_uses_last_public_windows_arm64_wheel(self):
+        self.assertIn("cryptography==46.0.3", self.text)
+
+
 class WorkflowParity(unittest.TestCase):
     """build_local.py mirrors the CI workflow's env + matrix; these fail
     when build-standalone-env.yml changes without updating the tooling."""
