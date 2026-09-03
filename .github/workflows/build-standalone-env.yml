@@ -33,50 +33,6 @@ jobs:
             os: windows-11-arm
             python_platform: aarch64-pc-windows-msvc
             vendor_requirements: requirements-nvidia-arm64.txt
-          - id: win-nvidia
-            os: windows-latest
-            python_platform: x86_64-pc-windows-msvc
-            vendor_requirements: requirements-nvidia.txt
-          # - id: win-nvidia-cu128
-          #   os: windows-latest
-          #   python_platform: x86_64-pc-windows-msvc
-          #   vendor_requirements: requirements-nvidia-cu128.txt
-          # - id: win-nvidia-cu126
-          #   os: windows-latest
-          #   python_platform: x86_64-pc-windows-msvc
-          #   vendor_requirements: requirements-nvidia-cu126.txt
-          - id: win-intel-xpu
-            os: windows-latest
-            python_platform: x86_64-pc-windows-msvc
-            vendor_requirements: requirements-intel.txt
-          # ROCm 7.14 multi-arch wheels cover Python 3.10-3.14, so win-amd
-          # uses the workspace default Python like every other variant.
-          - id: win-amd
-            os: windows-latest
-            python_platform: x86_64-pc-windows-msvc
-            vendor_requirements: requirements-amd-win.txt
-          - id: win-cpu
-            os: windows-latest
-            python_platform: x86_64-pc-windows-msvc
-            vendor_requirements: requirements-cpu.txt
-          # Linux
-          - id: linux-nvidia
-            os: ubuntu-latest
-            python_platform: x86_64-unknown-linux-gnu
-            vendor_requirements: requirements-nvidia.txt
-          - id: linux-amd
-            os: ubuntu-latest
-            python_platform: x86_64-unknown-linux-gnu
-            vendor_requirements: requirements-amd.txt
-          - id: linux-intel-xpu
-            os: ubuntu-latest
-            python_platform: x86_64-unknown-linux-gnu
-            vendor_requirements: requirements-intel.txt
-          # macOS
-          - id: mac-mps
-            os: macos-latest
-            python_platform: aarch64-apple-darwin
-            vendor_requirements: requirements-mac.txt
 
     runs-on: ${{ matrix.os }}
     name: Build ${{ matrix.id }}
@@ -84,7 +40,8 @@ jobs:
     # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions can
     # reference it via the `env` context — `secrets` is not allowed in `if:`.
     env:
-      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      # Smoke branch: never publish validation artifacts or metadata to R2.
+      R2_BUCKET_NAME: ""
 
     steps:
       - name: Checkout launcher repo
@@ -531,7 +488,8 @@ jobs:
     # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions can
     # reference it via the `env` context — `secrets` is not allowed in `if:`.
     env:
-      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      # Smoke branch: never publish validation artifacts or metadata to R2.
+      R2_BUCKET_NAME: ""
     steps:
       - name: Download all manifests
         uses: actions/download-artifact@v4
