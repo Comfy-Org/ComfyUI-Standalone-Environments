@@ -185,12 +185,16 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
             WHEEL_RELEASE="https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/releases/download/win-arm64-wheels-v1"
             mkdir win-arm64-wheels
+            # actions/checkout may convert text files to CRLF on Windows.
+            # Normalize once so the carriage return cannot enter a URL or
+            # checksum filename.
+            tr -d '\r' < win-arm64-wheels.sha256 > win-arm64-wheels/checksums.sha256
             while read -r _ filename; do
               curl -fL --retry 3 \
                 -o "win-arm64-wheels/$filename" \
                 "$WHEEL_RELEASE/$filename"
-            done < win-arm64-wheels.sha256
-            (cd win-arm64-wheels && sha256sum -c ../win-arm64-wheels.sha256)
+            done < win-arm64-wheels/checksums.sha256
+            (cd win-arm64-wheels && sha256sum -c checksums.sha256)
             "$PYTHON" -m pip install --no-cache-dir \
               win-arm64-wheels/blake3-1.0.9-cp313-cp313-win_arm64.whl \
               win-arm64-wheels/kornia_rs-0.1.14-cp313-cp313-win_arm64.whl
