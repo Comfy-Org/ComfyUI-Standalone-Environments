@@ -107,6 +107,29 @@ class WindowsArm64Requirements(unittest.TestCase):
         self.assertIn("cryptography==46.0.3", self.text)
 
 
+class WindowsArm64WheelChecksums(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.path = (Path(__file__).resolve().parent.parent
+                    / "win-arm64-wheels.sha256")
+        cls.checksums = build_local.load_sha256_checksums(cls.path)
+
+    def test_checksum_manifest_covers_exactly_the_hosted_wheels(self):
+        self.assertEqual(set(self.checksums),
+                         set(build_local.WINDOWS_ARM64_WHEELS))
+
+    def test_checksums_are_sha256_digests(self):
+        for digest in self.checksums.values():
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_hash_mismatch_is_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "wheel.whl"
+            wheel.write_bytes(b"tampered")
+            with self.assertRaises(SystemExit):
+                build_local.verify_sha256(wheel, "0" * 64)
+
+
 class WorkflowParity(unittest.TestCase):
     """build_local.py mirrors the CI workflow's env + matrix; these fail
     when build-standalone-env.yml changes without updating the tooling."""
@@ -154,6 +177,9 @@ class WorkflowParity(unittest.TestCase):
 
     def test_7z_parameters_match(self):
         self.assertIn(" ".join(build_local.SEVENZ_ARGS), self.text)
+
+    def test_arm64_wheel_checksum_manifest_is_verified(self):
+        self.assertIn("sha256sum -c ../win-arm64-wheels.sha256", self.text)
 
 
 class ArchiveFilename(unittest.TestCase):
