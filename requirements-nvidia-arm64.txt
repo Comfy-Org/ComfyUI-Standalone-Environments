@@ -1,0 +1,11 @@
+# NVIDIA RTX Spark requirements (Windows ARM64, CUDA 13.4 developer preview)
+# These exact NVIDIA nightlies are ephemeral. Bump the three dated pins together.
+--extra-index-url https://pypi.nvidia.com/nvtorch_oot_nightly
+
+torch==2.15.0.dev20260902+cu134
+torchvision==0.30.0.dev20260902+cu134
+torchaudio==2.11.0.dev20260902+cu134
+
+# Newer cryptography releases currently omit win_arm64 wheels. This is the
+# newest public abi3 wheel compatible with Python 3.13 on Windows ARM64.
+cryptography==46.0.3

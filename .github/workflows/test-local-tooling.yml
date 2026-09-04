@@ -15,6 +15,9 @@ on:
       # Parity tests compare build_local.py constants to the CI matrix.
       - .github/workflows/build-standalone-env.yml
       - .github/workflows/test-local-tooling.yml
+      # The Windows ARM64 tests read these data files directly.
+      - requirements-nvidia-arm64.txt
+      - win-arm64-wheels.sha256
   pull_request:
     paths:
       - scripts/build_local.py
@@ -22,6 +25,8 @@ on:
       - scripts/test_local_tooling.py
       - .github/workflows/build-standalone-env.yml
       - .github/workflows/test-local-tooling.yml
+      - requirements-nvidia-arm64.txt
+      - win-arm64-wheels.sha256
 
 permissions:
   contents: read

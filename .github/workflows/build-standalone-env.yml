@@ -29,6 +29,15 @@ jobs:
       matrix:
         include:
           # Windows
+          # The beta- prefix keeps this bundle out of shipped desktops: their
+          # install wizard lists only win-/mac-/linux- vendor ids, so an x64
+          # user never sees (or gets recommended) an ARM64 card. Rename to
+          # win-nvidia-arm64 once a desktop release ships the architecture
+          # filter (Comfy-Desktop#1481).
+          - id: beta-win-nvidia-arm64
+            os: windows-11-arm
+            python_platform: aarch64-pc-windows-msvc
+            vendor_requirements: requirements-nvidia-arm64.txt
           - id: win-nvidia
             os: windows-latest
             python_platform: x86_64-pc-windows-msvc
@@ -216,13 +225,40 @@ jobs:
 
           "$PYTHON" -m ensurepip --upgrade 2>/dev/null || true
           "$PYTHON" -m pip install --upgrade pip
+
+          # ComfyUI requires these native Rust extensions, but neither package
+          # publishes a Windows ARM64 wheel on PyPI yet. Install the verified
+          # wheels from win-arm64-wheels-v1 first so the later unpinned
+          # requirements resolve to these already-installed versions.
+          if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
+            WHEEL_RELEASE="https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/releases/download/win-arm64-wheels-v1"
+            mkdir win-arm64-wheels
+            # actions/checkout may convert text files to CRLF on Windows.
+            # Normalize once so the carriage return cannot enter a URL or
+            # checksum filename.
+            tr -d '\r' < win-arm64-wheels.sha256 > win-arm64-wheels/checksums.sha256
+            while read -r _ filename; do
+              curl -fL --retry 3 \
+                -o "win-arm64-wheels/$filename" \
+                "$WHEEL_RELEASE/$filename"
+            done < win-arm64-wheels/checksums.sha256
+            (cd win-arm64-wheels && sha256sum -c checksums.sha256)
+            "$PYTHON" -m pip install --no-cache-dir \
+              win-arm64-wheels/blake3-1.0.9-cp313-cp313-win_arm64.whl \
+              win-arm64-wheels/kornia_rs-0.1.14-cp313-cp313-win_arm64.whl
+          fi
+
           "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2
 
       - name: Bundle uv
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            UV_ARCHIVE="uv-x86_64-pc-windows-msvc.zip"
+            if [[ "${{ runner.arch }}" == "ARM64" ]]; then
+              UV_ARCHIVE="uv-aarch64-pc-windows-msvc.zip"
+            else
+              UV_ARCHIVE="uv-x86_64-pc-windows-msvc.zip"
+            fi
             curl -L -o uv.zip "https://github.com/astral-sh/uv/releases/latest/download/${UV_ARCHIVE}"
             unzip uv.zip -d uv-extract
             cp uv-extract/uv.exe standalone-env/
@@ -318,6 +354,18 @@ jobs:
           print(f'pygit2 {pygit2.__version__}')
           print('All core imports OK')
           "
+
+          if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
+            echo "=== Verifying hosted Windows ARM64 wheels ==="
+            "$PYTHON" -c "
+          import importlib.metadata
+          import blake3
+          import kornia_rs
+          assert blake3.__version__ == '1.0.9', blake3.__version__
+          assert importlib.metadata.version('kornia-rs') == '0.1.14'
+          print('blake3 and kornia-rs ARM64 imports OK')
+          "
+          fi
 
       - name: Generate build manifest
         shell: bash
@@ -494,6 +542,11 @@ jobs:
 
   publish-manifests:
     needs: build
+    # Run even when a matrix leg failed: every leg uploads its own archive and
+    # manifest.json to R2 before this job, so skipping it would leave the
+    # successful legs' archives uncatalogued (no latest.json/releases.json).
+    # The failed leg still fails the run.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     name: Publish manifests
     # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions can

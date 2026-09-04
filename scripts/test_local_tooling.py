@@ -75,9 +75,59 @@ class VariantPythonVersion(unittest.TestCase):
             del build_local.VARIANT_PYTHON_VERSIONS["win-amd"]
 
     def test_variants_without_override_use_workflow_default(self):
-        for v in ["win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
+        for v in ["beta-win-nvidia-arm64", "win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
             self.assertEqual(build_local.variant_python_version(v),
                              build_local.PYTHON_VERSION)
+
+
+class WindowsArm64Requirements(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = (Path(__file__).resolve().parent.parent
+                / "requirements-nvidia-arm64.txt")
+        cls.text = path.read_text(encoding="utf-8")
+
+    def test_nvidia_nightlies_share_date_and_cuda_version(self):
+        pins = {
+            package: (date, cuda)
+            for package, date, cuda in re.findall(
+                r"^(torch|torchvision|torchaudio)==[^\n]*dev(\d{8})\+(cu\d+)$",
+                self.text,
+                re.M,
+            )
+        }
+        self.assertEqual(set(pins), {"torch", "torchvision", "torchaudio"})
+        self.assertEqual(len({date for date, _ in pins.values()}), 1)
+        self.assertEqual({cuda for _, cuda in pins.values()}, {"cu134"})
+
+    def test_prereleases_are_not_enabled_for_all_comfyui_dependencies(self):
+        self.assertNotRegex(self.text, r"(?m)^\s*--pre\s*$")
+
+    def test_cryptography_uses_last_public_windows_arm64_wheel(self):
+        self.assertIn("cryptography==46.0.3", self.text)
+
+
+class WindowsArm64WheelChecksums(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.path = (Path(__file__).resolve().parent.parent
+                    / "win-arm64-wheels.sha256")
+        cls.checksums = build_local.load_sha256_checksums(cls.path)
+
+    def test_checksum_manifest_covers_exactly_the_hosted_wheels(self):
+        self.assertEqual(set(self.checksums),
+                         set(build_local.WINDOWS_ARM64_WHEELS))
+
+    def test_checksums_are_sha256_digests(self):
+        for digest in self.checksums.values():
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_hash_mismatch_is_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wheel = Path(tmp) / "wheel.whl"
+            wheel.write_bytes(b"tampered")
+            with self.assertRaises(SystemExit):
+                build_local.verify_sha256(wheel, "0" * 64)
 
 
 class WorkflowParity(unittest.TestCase):
@@ -111,6 +161,12 @@ class WorkflowParity(unittest.TestCase):
             self.assertIsNotNone(m, vid)
             self.assertEqual(m.group(1), build_local.VARIANTS[vid], vid)
 
+    def test_python_platforms_match_matrix(self):
+        for vid, block in self.entries.items():
+            m = re.search(r"^\s+python_platform: (\S+)$", block, re.M)
+            self.assertIsNotNone(m, vid)
+            self.assertEqual(m.group(1), build_local.PYTHON_PLATFORMS[vid], vid)
+
     def test_python_version_overrides_match_matrix(self):
         overrides = {}
         for vid, block in self.entries.items():
@@ -122,6 +178,19 @@ class WorkflowParity(unittest.TestCase):
     def test_7z_parameters_match(self):
         self.assertIn(" ".join(build_local.SEVENZ_ARGS), self.text)
 
+    def test_arm64_wheel_checksum_manifest_is_verified(self):
+        self.assertIn("sha256sum -c checksums.sha256", self.text)
+        self.assertIn("tr -d '\\r' < win-arm64-wheels.sha256", self.text)
+
+
+class VariantOs(unittest.TestCase):
+    def test_beta_prefix_does_not_change_the_host_os(self):
+        # beta- hides a vendor id from shipped desktops; the OS segment that
+        # gates local builds and picks the archive format follows it.
+        self.assertEqual(build_local.variant_os("beta-win-nvidia-arm64"), "win")
+        self.assertEqual(build_local.variant_os("win-nvidia"), "win")
+        self.assertEqual(build_local.variant_os("mac-mps"), "mac")
+
 
 class ArchiveFilename(unittest.TestCase):
     def test_mac_uses_tar_gz_others_7z(self):
@@ -131,6 +200,8 @@ class ArchiveFilename(unittest.TestCase):
                          "comfyui-standalone-win-amd-v1-local1.7z")
         self.assertEqual(build_local.archive_filename("linux-nvidia", "v1-local1"),
                          "comfyui-standalone-linux-nvidia-v1-local1.7z")
+        self.assertEqual(build_local.archive_filename("beta-win-nvidia-arm64", "v1-local1"),
+                         "comfyui-standalone-beta-win-nvidia-arm64-v1-local1.7z")
 
 
 class BuildManifest(unittest.TestCase):
