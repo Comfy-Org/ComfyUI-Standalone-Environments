@@ -20,13 +20,12 @@ on:
       tag:
         description: Release tag to attach the wheels to
         required: true
-        default: win-arm64-wheels-v1
   pull_request:
     paths:
       - .github/workflows/build-win-arm64-wheels.yml
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   # Must match the standalone bundle's interpreter (cp313 wheels).
@@ -44,6 +43,7 @@ jobs:
         with:
           repository: oconnor663/blake3-py
           ref: ${{ env.BLAKE3_TAG }}
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -83,6 +83,7 @@ jobs:
         with:
           repository: kornia/kornia-rs
           ref: ${{ env.KORNIA_RS_TAG }}
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -121,7 +122,7 @@ jobs:
           if (-not $wheel) { throw "No win_arm64 wheel was produced" }
           Write-Host "Built $($wheel.Name)"
           python -m pip install --force-reinstall $wheel.FullName
-          python -c "import kornia_rs, platform, importlib.metadata as m; assert platform.machine().upper() == 'ARM64', platform.machine(); print('kornia_rs', m.version('kornia_rs'), 'OK')"
+          python -c "import kornia_rs, platform, importlib.metadata as m; version = m.version('kornia-rs'); assert platform.machine().upper() == 'ARM64', platform.machine(); assert version == '${{ env.KORNIA_RS_TAG }}'.removeprefix('v'), version; print('kornia_rs', version, 'OK')"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -134,7 +135,32 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: [blake3, kornia-rs]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - name: Refuse to overwrite a published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_state="$(
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+              jq -r --arg tag "$RELEASE_TAG" '
+                [.[][] | select(.tag_name == $tag)] |
+                if length == 0 then "missing"
+                elif any(.draft == false) then "published"
+                else "draft"
+                end
+              '
+          )"
+          if [[ "$release_state" == "published" ]]; then
+            echo "::error::Release ${RELEASE_TAG} is already published; use a new tag"
+            exit 1
+          fi
+          echo "Release ${RELEASE_TAG} is ${release_state}; continuing"
+
       - uses: actions/download-artifact@v7
         with:
           path: wheels
