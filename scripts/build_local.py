@@ -48,7 +48,7 @@ PBS_RELEASE = "20260211"
 VARIANT_PYTHON_VERSIONS = {}
 
 VARIANTS = {
-    "win-nvidia-arm64": "requirements-nvidia-arm64.txt",
+    "beta-win-nvidia-arm64": "requirements-nvidia-arm64.txt",
     "win-nvidia": "requirements-nvidia.txt",
     "win-intel-xpu": "requirements-intel.txt",
     "win-amd": "requirements-amd-win.txt",
@@ -60,7 +60,7 @@ VARIANTS = {
 }
 
 PYTHON_PLATFORMS = {
-    "win-nvidia-arm64": "aarch64-pc-windows-msvc",
+    "beta-win-nvidia-arm64": "aarch64-pc-windows-msvc",
     "win-nvidia": "x86_64-pc-windows-msvc",
     "win-intel-xpu": "x86_64-pc-windows-msvc",
     "win-amd": "x86_64-pc-windows-msvc",
@@ -100,7 +100,15 @@ SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SEVENZ_ARGS = ["-t7z", "-m0=lzma2", "-mx=3", "-mfb=32", "-md=16m", "-ms=on", "-mf=off"]
 
 
+# Vendor ids with this prefix are invisible to shipped desktops (their install
+# wizard lists only win-/mac-/linux- ids), which hides pre-release bundles
+# such as beta-win-nvidia-arm64 from users who cannot run them.
+BETA_PREFIX = "beta-"
+
+
 def variant_os(variant):
+    if variant.startswith(BETA_PREFIX):
+        variant = variant[len(BETA_PREFIX):]
     return variant.split("-", 1)[0]
 
 

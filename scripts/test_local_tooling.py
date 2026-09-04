@@ -75,7 +75,7 @@ class VariantPythonVersion(unittest.TestCase):
             del build_local.VARIANT_PYTHON_VERSIONS["win-amd"]
 
     def test_variants_without_override_use_workflow_default(self):
-        for v in ["win-nvidia-arm64", "win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
+        for v in ["beta-win-nvidia-arm64", "win-nvidia", "win-amd", "linux-amd", "mac-mps"]:
             self.assertEqual(build_local.variant_python_version(v),
                              build_local.PYTHON_VERSION)
 
@@ -183,6 +183,15 @@ class WorkflowParity(unittest.TestCase):
         self.assertIn("tr -d '\\r' < win-arm64-wheels.sha256", self.text)
 
 
+class VariantOs(unittest.TestCase):
+    def test_beta_prefix_does_not_change_the_host_os(self):
+        # beta- hides a vendor id from shipped desktops; the OS segment that
+        # gates local builds and picks the archive format follows it.
+        self.assertEqual(build_local.variant_os("beta-win-nvidia-arm64"), "win")
+        self.assertEqual(build_local.variant_os("win-nvidia"), "win")
+        self.assertEqual(build_local.variant_os("mac-mps"), "mac")
+
+
 class ArchiveFilename(unittest.TestCase):
     def test_mac_uses_tar_gz_others_7z(self):
         self.assertEqual(build_local.archive_filename("mac-mps", "v1-local1"),
@@ -191,6 +200,8 @@ class ArchiveFilename(unittest.TestCase):
                          "comfyui-standalone-win-amd-v1-local1.7z")
         self.assertEqual(build_local.archive_filename("linux-nvidia", "v1-local1"),
                          "comfyui-standalone-linux-nvidia-v1-local1.7z")
+        self.assertEqual(build_local.archive_filename("beta-win-nvidia-arm64", "v1-local1"),
+                         "comfyui-standalone-beta-win-nvidia-arm64-v1-local1.7z")
 
 
 class BuildManifest(unittest.TestCase):

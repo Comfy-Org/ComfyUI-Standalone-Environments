@@ -29,7 +29,12 @@ jobs:
       matrix:
         include:
           # Windows
-          - id: win-nvidia-arm64
+          # The beta- prefix keeps this bundle out of shipped desktops: their
+          # install wizard lists only win-/mac-/linux- vendor ids, so an x64
+          # user never sees (or gets recommended) an ARM64 card. Rename to
+          # win-nvidia-arm64 once a desktop release ships the architecture
+          # filter (Comfy-Desktop#1481).
+          - id: beta-win-nvidia-arm64
             os: windows-11-arm
             python_platform: aarch64-pc-windows-msvc
             vendor_requirements: requirements-nvidia-arm64.txt
@@ -537,6 +542,11 @@ jobs:
 
   publish-manifests:
     needs: build
+    # Run even when a matrix leg failed: every leg uploads its own archive and
+    # manifest.json to R2 before this job, so skipping it would leave the
+    # successful legs' archives uncatalogued (no latest.json/releases.json).
+    # The failed leg still fails the run.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     name: Publish manifests
     # Expose R2_BUCKET_NAME at the job level so step-level `if:` expressions can
