@@ -1,0 +1,186 @@
+name: Build win-arm64 wheels
+
+# Native Windows ARM64 wheels for the two ComfyUI dependencies that publish
+# none on PyPI yet. Built from the upstream release tags on GitHub's
+# windows-11-arm runner and attached to a GitHub release, so the
+# win-nvidia-arm64 bundle can pip-install them by URL before
+# `-r ComfyUI/requirements.txt`.
+#
+# Drop each package once upstream ships win_arm64 wheels on PyPI:
+#   blake3    - open PR: https://github.com/oconnor663/blake3-py/pull/112
+#   kornia-rs - release CI merged in kornia/kornia-rs#1093; lands with the
+#               first release after v0.1.15-rc.5
+#
+# Pull requests that touch this file build the wheels and upload them as
+# artifacts only. The release is created on workflow_dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the wheels to
+        required: true
+  pull_request:
+    paths:
+      - .github/workflows/build-win-arm64-wheels.yml
+
+permissions:
+  contents: read
+
+env:
+  # Must match the standalone bundle's interpreter (cp313 wheels).
+  PYTHON_VERSION: "3.13"
+  # Upstream release tags. Bump together with ComfyUI/requirements.txt.
+  BLAKE3_TAG: "1.0.9"
+  KORNIA_RS_TAG: "v0.1.14"
+
+jobs:
+  blake3:
+    name: blake3 win_arm64
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: oconnor663/blake3-py
+          ref: ${{ env.BLAKE3_TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: arm64
+
+      # Same recipe as upstream's Windows ARM64 job (blake3-py#112).
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: aarch64
+          args: --release --out dist --interpreter ${{ env.PYTHON_VERSION }}
+          rust-toolchain: stable
+
+      - name: Verify native ARM64 wheel
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist\*-win_arm64.whl | Select-Object -First 1
+          if (-not $wheel) { throw "No win_arm64 wheel was produced" }
+          Write-Host "Built $($wheel.Name)"
+          python -m pip install --force-reinstall $wheel.FullName
+          python -c "import blake3, platform; assert platform.machine().upper() == 'ARM64', platform.machine(); assert blake3.__version__ == '${{ env.BLAKE3_TAG }}', blake3.__version__; assert len(blake3.blake3(b'abc').hexdigest()) == 64; print('blake3', blake3.__version__, 'OK')"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: blake3-win_arm64
+          path: dist/*-win_arm64.whl
+          if-no-files-found: error
+
+  kornia-rs:
+    name: kornia-rs win_arm64
+    runs-on: windows-11-arm
+    env:
+      CMAKE_GENERATOR: Ninja
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: kornia/kornia-rs
+          ref: ${{ env.KORNIA_RS_TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: arm64
+
+      # Same recipe as upstream's windows-arm64 release job (kornia-rs#1093).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+
+      - name: Install native build tools
+        run: python -m pip install --upgrade cmake ninja
+
+      # v0.1.14's Cargo.lock pins generator 0.8.8 (via loom, kiddo), which has
+      # no aarch64-windows backend and fails to compile. 0.8.9 (2026-06-01)
+      # added it and is what upstream main locks. Patch-level bump of one
+      # transitive crate; the kornia-rs sources stay at the release tag.
+      - name: Bump generator crate for Windows ARM64 support
+        run: cargo update -p generator --precise 0.8.9
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          maturin-version: latest
+          args: --release --target aarch64-pc-windows-msvc --out dist -i python${{ env.PYTHON_VERSION }} -m kornia-py/Cargo.toml
+
+      - name: Verify native ARM64 wheel
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist\*-win_arm64.whl | Select-Object -First 1
+          if (-not $wheel) { throw "No win_arm64 wheel was produced" }
+          Write-Host "Built $($wheel.Name)"
+          python -m pip install --force-reinstall $wheel.FullName
+          python -c "import kornia_rs, platform, importlib.metadata as m; version = m.version('kornia-rs'); assert platform.machine().upper() == 'ARM64', platform.machine(); assert version == '${{ env.KORNIA_RS_TAG }}'.removeprefix('v'), version; print('kornia_rs', version, 'OK')"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kornia-rs-win_arm64
+          path: dist/*-win_arm64.whl
+          if-no-files-found: error
+
+  release:
+    name: Attach wheels to release
+    if: github.event_name == 'workflow_dispatch'
+    needs: [blake3, kornia-rs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Refuse to overwrite a published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_state="$(
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+              jq -r --arg tag "$RELEASE_TAG" '
+                [.[][] | select(.tag_name == $tag)] |
+                if length == 0 then "missing"
+                elif any(.draft == false) then "published"
+                else "draft"
+                end
+              '
+          )"
+          if [[ "$release_state" == "published" ]]; then
+            echo "::error::Release ${RELEASE_TAG} is already published; use a new tag"
+            exit 1
+          fi
+          echo "Release ${RELEASE_TAG} is ${release_state}; continuing"
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: wheels
+          merge-multiple: true
+
+      - name: List wheels
+        run: ls -l wheels
+
+      # Draft so the asset names can be checked before the URLs go live;
+      # never "latest", which belongs to the bundle releases.
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Windows ARM64 wheels (${{ inputs.tag }})
+          body: |
+            Native `win_arm64` wheels for ComfyUI dependencies that publish none on PyPI yet.
+            Built by `.github/workflows/build-win-arm64-wheels.yml` from upstream release tags:
+            blake3 `${{ env.BLAKE3_TAG }}`, kornia-rs `${{ env.KORNIA_RS_TAG }}`.
+            Consumed by the `win-nvidia-arm64` standalone bundle build.
+          files: wheels/*.whl
+          draft: true
+          make_latest: false
+          fail_on_unmatched_files: true
