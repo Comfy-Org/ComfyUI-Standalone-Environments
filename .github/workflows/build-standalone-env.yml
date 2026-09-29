@@ -93,7 +93,7 @@ jobs:
 
     steps:
       - name: Checkout launcher repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve ComfyUI ref
         id: comfyui
