@@ -12,7 +12,8 @@ cryptography==46.0.3
 
 # Upstream now publishes native CPython 3.13 ARM64 wheels for both packages.
 # Keep them binary-only so a missing wheel fails instead of needing Rust/MSVC.
---only-binary=blake3,kornia-rs
+--only-binary=blake3
+--only-binary=kornia-rs
 blake3==1.0.11
 kornia-rs==0.1.15
 

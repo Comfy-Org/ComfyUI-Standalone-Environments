@@ -92,7 +92,8 @@ Older releases can still download the historical `win-arm64-wheels-v1` assets;
 new builds no longer use those custom Rust wheels.
 
 Local ARM64 builds use the same OpenCV build script and require native ARM64
-Python 3.11 or later, git, and Visual Studio 2022 C++ ARM64 build tools. Build
+Python 3.11 or later, git, and Visual Studio 2026 C++ ARM64 build tools (or
+`CMAKE_GENERATOR` set to the installed Visual Studio version). Build
 dependencies are installed into a separate temporary venv. A fresh OpenCV
 source build adds build time; the resulting desktop environment contains the
 installed wheel, not the compiler or the build venv.

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build OpenCV from pinned public sources on native Windows ARM64.
 
-Requires an ARM64 CPython >= 3.11, git, and Visual Studio 2022 C++ ARM64
-build tools. Build dependencies live in a separate venv, not the bundle.
+Requires an ARM64 CPython >= 3.11, git, and Visual Studio 2026 C++ ARM64
+build tools (or set CMAKE_GENERATOR for another installed VS version).
+Build dependencies live in a separate venv, not the bundle.
 The returned wheel includes upstream's license and third-party notices.
 """
 
@@ -49,7 +50,8 @@ def build(work):
     run(sys.executable, "-m", "venv", work / "venv")
     python = work / "venv" / "Scripts" / "python.exe"
     requirements = tomllib.loads((source / "pyproject.toml").read_text())["build-system"]["requires"]
-    run(python, "-m", "pip", "install", *requirements, "cmake==4.1.0", "wheel==0.45.1")
+    run(python, "-m", "pip", "install", *requirements,
+        "cmake==4.4.3", "scikit-build==0.19.1", "wheel==0.45.1")
     env = {
         **os.environ,
         "CI_BUILD": "1",
@@ -58,8 +60,11 @@ def build(work):
         "ENABLE_ROLLING": "0",
         "CMAKE_BUILD_PARALLEL_LEVEL": "4",
     }
+    # Upstream hard-codes VS2022; the native hosted runner now uses VS2026.
+    # scikit-build gives these command-line CMake args precedence over setup.py.
+    generator = os.environ.get("CMAKE_GENERATOR", "Visual Studio 18 2026")
     run(python, "setup.py", "bdist_wheel", "--py-limited-api=cp37",
-        "--dist-dir", output, cwd=source, env=env)
+        "--dist-dir", output, "--", "-G", generator, cwd=source, env=env)
     wheel = find_wheel(output)
     print(f"Built {wheel.name} from {OPENCV_REF}", flush=True)
     return wheel
