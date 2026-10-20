@@ -44,7 +44,7 @@ workflow for one variant on your machine, and `scripts/serve_local.py`
 serves the result with the same URL layout as R2 so a dev desktop can
 ingest it. Nothing is uploaded anywhere.
 
-Prerequisites: Python 3.11+, `git`, 7-Zip (`7z` on PATH, or the default
+Prerequisites: Python 3, `git`, 7-Zip (`7z` on PATH, or the default
 Windows install location), network access, and tens of GB of free disk.
 Only variants matching the host OS can be built (pip resolves wheels for
 the running platform) - for other platforms, run the workflow via

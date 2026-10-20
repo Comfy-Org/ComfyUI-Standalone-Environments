@@ -30,6 +30,9 @@ jobs:
 
   build:
     needs: native-wheels
+    # A failed ARM64 wheel must not skip the other platform builds. The ARM64
+    # matrix entry will fail when its required artifact is unavailable.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:

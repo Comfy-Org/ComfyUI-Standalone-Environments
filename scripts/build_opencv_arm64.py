@@ -12,7 +12,6 @@ import os
 import platform
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 # Same public source revision used for NVIDIA's WoA evaluation build.
@@ -31,6 +30,12 @@ def find_wheel(directory):
 def build(work):
     if sys.platform != "win32" or platform.machine().upper() != "ARM64":
         raise SystemExit("OpenCV must be built with native Windows ARM64 Python")
+    if sys.version_info < (3, 11):
+        raise SystemExit("Building OpenCV requires Python 3.11 or later")
+    # Keep importing the local tooling compatible with older Python versions
+    # on platforms that never build this wheel.
+    import tomllib
+
     work = work.resolve()
     work.mkdir(parents=True, exist_ok=False)
     source = work / "source"
@@ -46,6 +51,8 @@ def build(work):
         "https://github.com/opencv/opencv-python.git")
     run("git", "-C", source, "fetch", "--depth=1", "origin", OPENCV_REF)
     run("git", "-C", source, "checkout", "--detach", "FETCH_HEAD")
+    # find_version.py uses this suffix for the version pinned in requirements.
+    run("git", "-C", source, "config", "core.abbrev", "7")
     run("git", "-C", source, "submodule", "update", "--init", "--depth=1", "opencv")
     run(sys.executable, "-m", "venv", work / "venv")
     python = work / "venv" / "Scripts" / "python.exe"
