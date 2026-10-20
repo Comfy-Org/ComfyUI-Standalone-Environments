@@ -11,11 +11,13 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_local  # noqa: E402
+import build_opencv_arm64  # noqa: E402
 import serve_local  # noqa: E402
 
 
@@ -107,27 +109,64 @@ class WindowsArm64Requirements(unittest.TestCase):
         self.assertIn("cryptography==46.0.3", self.text)
 
 
-class WindowsArm64WheelChecksums(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.path = (Path(__file__).resolve().parent.parent
-                    / "win-arm64-wheels.sha256")
-        cls.checksums = build_local.load_sha256_checksums(cls.path)
-
-    def test_checksum_manifest_covers_exactly_the_hosted_wheels(self):
-        self.assertEqual(set(self.checksums),
-                         set(build_local.WINDOWS_ARM64_WHEELS))
-
-    def test_checksums_are_sha256_digests(self):
-        for digest in self.checksums.values():
-            self.assertRegex(digest, r"^[0-9a-f]{64}$")
-
-    def test_hash_mismatch_is_fatal(self):
+class WindowsArm64NativeDependencies(unittest.TestCase):
+    def test_install_resolves_opencv_with_full_requirements(self):
         with tempfile.TemporaryDirectory() as tmp:
-            wheel = Path(tmp) / "wheel.whl"
-            wheel.write_bytes(b"tampered")
-            with self.assertRaises(SystemExit):
-                build_local.verify_sha256(wheel, "0" * 64)
+            work = Path(tmp)
+            wheel = work / "opencv_python-4.14.0+c9cce3d-cp37-abi3-win_arm64.whl"
+            with patch.object(build_local, "HOST_OS", "win"), \
+                    patch.object(build_local.subprocess, "run"), \
+                    patch.object(build_local, "run") as run, \
+                    patch.object(build_local, "build_opencv_wheel", return_value=wheel) as build:
+                build_local.install_requirements(
+                    work, "beta-win-nvidia-arm64", "requirements-nvidia-arm64.txt")
+            build.assert_called_once_with(work / "opencv-build")
+            install = run.call_args_list[-1].args[0]
+            self.assertIn(str(wheel), install)
+            self.assertIn("requirements_final.txt", install)
+            requirements = (work / "requirements_final.txt").read_text()
+            self.assertIn("--only-binary=blake3,kornia-rs", requirements)
+            self.assertIn("blake3==1.0.11", requirements)
+            self.assertIn("kornia-rs==0.1.15", requirements)
+            self.assertIn("-r ComfyUI/requirements.txt", requirements)
+            self.assertIn("-r ComfyUI/manager_requirements.txt", requirements)
+
+    def test_x64_install_does_not_build_or_install_arm64_wheels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(build_local, "HOST_OS", "win"), \
+                    patch.object(build_local.subprocess, "run"), \
+                    patch.object(build_local, "run") as run, \
+                    patch.object(build_local, "build_opencv_wheel") as build:
+                build_local.install_requirements(Path(tmp), "win-nvidia", "requirements-nvidia.txt")
+            build.assert_not_called()
+            self.assertFalse(any(str(arg).endswith(".whl") for arg in run.call_args.args[0]))
+
+    def test_wheel_selection_rejects_foreign_architecture_and_ambiguous_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for name in ["opencv_python-4.14.0-cp37-abi3-win_amd64.whl",
+                         "opencv_python_headless-4.14.0-cp37-abi3-win_arm64.whl"]:
+                wheel = directory / name
+                wheel.touch()
+                with self.assertRaises(RuntimeError):
+                    build_opencv_arm64.find_wheel(directory)
+                wheel.unlink()
+            wheel = directory / "opencv_python-4.14.0+c9cce3d-cp37-abi3-win_arm64.whl"
+            wheel.touch()
+            self.assertEqual(build_opencv_arm64.find_wheel(directory), wheel)
+            (directory / "extra.whl").touch()
+            with self.assertRaises(RuntimeError):
+                build_opencv_arm64.find_wheel(directory)
+
+    def test_foreign_host_is_rejected_before_running_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "build"
+            with patch.object(build_opencv_arm64.sys, "platform", "linux"), \
+                    patch.object(build_opencv_arm64.subprocess, "run") as run:
+                with self.assertRaises(SystemExit):
+                    build_opencv_arm64.build(work)
+            run.assert_not_called()
+            self.assertFalse(work.exists())
 
 
 class WorkflowParity(unittest.TestCase):
@@ -178,9 +217,6 @@ class WorkflowParity(unittest.TestCase):
     def test_7z_parameters_match(self):
         self.assertIn(" ".join(build_local.SEVENZ_ARGS), self.text)
 
-    def test_arm64_wheel_checksum_manifest_is_verified(self):
-        self.assertIn("sha256sum -c checksums.sha256", self.text)
-        self.assertIn("tr -d '\\r' < win-arm64-wheels.sha256", self.text)
 
 
 class VariantOs(unittest.TestCase):

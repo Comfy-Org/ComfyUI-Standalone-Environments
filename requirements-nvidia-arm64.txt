@@ -9,3 +9,13 @@ torchaudio==2.11.0.dev20260902+cu134
 # Newer cryptography releases currently omit win_arm64 wheels. This is the
 # newest public abi3 wheel compatible with Python 3.13 on Windows ARM64.
 cryptography==46.0.3
+
+# Upstream now publishes native CPython 3.13 ARM64 wheels for both packages.
+# Keep them binary-only so a missing wheel fails instead of needing Rust/MSVC.
+--only-binary=blake3,kornia-rs
+blake3==1.0.11
+kornia-rs==0.1.15
+
+# OpenCV is supplied as a wheel built from pinned public sources by
+# scripts/build_opencv_arm64.py (no public win_arm64 wheel on PyPI yet).
+opencv-python==4.14.0+c9cce3d

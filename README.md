@@ -44,7 +44,7 @@ workflow for one variant on your machine, and `scripts/serve_local.py`
 serves the result with the same URL layout as R2 so a dev desktop can
 ingest it. Nothing is uploaded anywhere.
 
-Prerequisites: Python 3, `git`, 7-Zip (`7z` on PATH, or the default
+Prerequisites: Python 3.11+, `git`, 7-Zip (`7z` on PATH, or the default
 Windows install location), network access, and tens of GB of free disk.
 Only variants matching the host OS can be built (pip resolves wheels for
 the running platform) - for other platforms, run the workflow via
@@ -73,3 +73,33 @@ shadow a real release tag. Keep `build_local.py`'s constants in sync
 with the workflow matrix when it changes; `scripts/test_local_tooling.py`
 covers the metadata generation
 (`python -m unittest scripts.test_local_tooling`).
+
+
+## Windows ARM64 native dependencies
+
+The `beta-win-nvidia-arm64` environment includes OpenCV so custom nodes can
+import `cv2` without compiling it locally. The environment workflow builds
+`opencv-python` from the pinned public commit in `scripts/build_opencv_arm64.py`,
+then consumes that run's wheel artifact. It does not redistribute NVIDIA's
+internal evaluation archive or rely on an unpublished release URL.
+
+The reusable `Build Windows ARM64 OpenCV` workflow also runs on relevant PRs.
+It installs the wheel alongside the upstream PyPI ARM64 wheels for `blake3`
+and `kornia-rs`, then checks native imports, a known BLAKE3 digest, color
+conversion, and a lossless PNG encode/decode round-trip on Python 3.13.
+The completed standalone bundle runs the same checks after stripping.
+Older releases can still download the historical `win-arm64-wheels-v1` assets;
+new builds no longer use those custom Rust wheels.
+
+Local ARM64 builds use the same OpenCV build script and require native ARM64
+Python 3.11 or later, git, and Visual Studio 2022 C++ ARM64 build tools. Build
+dependencies are installed into a separate temporary venv. A fresh OpenCV
+source build adds build time; the resulting desktop environment contains the
+installed wheel, not the compiler or the build venv.
+
+This is the main, GUI-enabled OpenCV package. It has no `opencv_contrib`
+modules and no FFmpeg video backend on Windows ARM64. Image round-trip checks
+do not establish MP4/custom-node workflow compatibility; RTX Spark workflow
+QA is still required before an environment release. Native wheel CI publishes
+only a GitHub Actions artifact; publishing environments remains the existing
+separate release workflow.
