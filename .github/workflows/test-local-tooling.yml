@@ -14,19 +14,23 @@ on:
       - scripts/test_local_tooling.py
       # Parity tests compare build_local.py constants to the CI matrix.
       - .github/workflows/build-standalone-env.yml
+      - .github/workflows/build-win-arm64-wheels.yml
       - .github/workflows/test-local-tooling.yml
-      # The Windows ARM64 tests read these data files directly.
+      # The Windows ARM64 tests exercise these dependency inputs.
       - requirements-nvidia-arm64.txt
-      - win-arm64-wheels.sha256
+      - scripts/build_opencv_arm64.py
+      - scripts/smoke_win_arm64.py
   pull_request:
     paths:
       - scripts/build_local.py
       - scripts/serve_local.py
       - scripts/test_local_tooling.py
       - .github/workflows/build-standalone-env.yml
+      - .github/workflows/build-win-arm64-wheels.yml
       - .github/workflows/test-local-tooling.yml
       - requirements-nvidia-arm64.txt
-      - win-arm64-wheels.sha256
+      - scripts/build_opencv_arm64.py
+      - scripts/smoke_win_arm64.py
 
 permissions:
   contents: read

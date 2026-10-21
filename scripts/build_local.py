@@ -26,7 +26,6 @@ Usage:
 """
 
 import argparse
-import hashlib
 import json
 import platform
 import re
@@ -36,6 +35,8 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+from build_opencv_arm64 import build as build_opencv_wheels
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -81,16 +82,6 @@ HOST_ARCHES = {
     "x86_64-unknown-linux-gnu": {"x86_64"},
     "aarch64-apple-darwin": {"arm64"},
 }
-
-WINDOWS_ARM64_WHEEL_RELEASE = (
-    "https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/"
-    "releases/download/win-arm64-wheels-v1"
-)
-WINDOWS_ARM64_WHEELS = (
-    "blake3-1.0.9-cp313-cp313-win_arm64.whl",
-    "kornia_rs-0.1.14-cp313-cp313-win_arm64.whl",
-)
-WINDOWS_ARM64_WHEEL_CHECKSUMS = REPO_ROOT / "win-arm64-wheels.sha256"
 
 # Keep in sync with SAFE_SEGMENT in serve_local.py / r2Catalog.ts: the tag
 # becomes a path segment in the served URL and the archive filename.
@@ -169,26 +160,6 @@ def download(url, dest):
         shutil.copyfileobj(resp, fh)
 
 
-def load_sha256_checksums(path):
-    checksums = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        digest, filename = line.split(maxsplit=1)
-        checksums[filename] = digest
-    return checksums
-
-
-def verify_sha256(path, expected):
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    actual = digest.hexdigest()
-    if actual != expected:
-        raise SystemExit(
-            f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
-        )
-
-
 def resolve_latest_comfyui_ref():
     url = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
     with urllib.request.urlopen(url) as resp:
@@ -236,18 +207,11 @@ def install_requirements(work, variant, vendor_req_name):
     subprocess.run([str(python), "-m", "ensurepip", "--upgrade"], check=False,
                    capture_output=True)
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=work)
+    wheels = []
     if PYTHON_PLATFORMS[variant] == "aarch64-pc-windows-msvc":
-        checksums = load_sha256_checksums(WINDOWS_ARM64_WHEEL_CHECKSUMS)
-        wheel_paths = []
-        for name in WINDOWS_ARM64_WHEELS:
-            wheel = work / name
-            download(f"{WINDOWS_ARM64_WHEEL_RELEASE}/{name}", wheel)
-            verify_sha256(wheel, checksums[name])
-            wheel_paths.append(str(wheel))
-        run([str(python), "-m", "pip", "install", "--no-cache-dir",
-             *wheel_paths], cwd=work)
+        wheels.extend(str(wheel) for wheel in build_opencv_wheels(work / "opencv-build"))
     run([str(python), "-m", "pip", "install", "--no-cache-dir",
-         "-r", "requirements_final.txt", "pygit2"], cwd=work)
+         "-r", "requirements_final.txt", "pygit2", *wheels], cwd=work)
 
 
 def bundle_uv(work, variant):
@@ -316,11 +280,7 @@ def smoke_test(work, variant):
          "import pygit2; print('pygit2', pygit2.__version__);"
          "print('All core imports OK')"], cwd=work)
     if PYTHON_PLATFORMS[variant] == "aarch64-pc-windows-msvc":
-        run([str(python), "-c",
-             "import importlib.metadata, blake3, kornia_rs;"
-             "assert blake3.__version__ == '1.0.9';"
-             "assert importlib.metadata.version('kornia-rs') == '0.1.14';"
-             "print('blake3 and kornia-rs ARM64 imports OK')"], cwd=work)
+        run([str(python), str(REPO_ROOT / "scripts" / "smoke_win_arm64.py")], cwd=work)
 
 
 def introspect_versions(work, uv_bin):

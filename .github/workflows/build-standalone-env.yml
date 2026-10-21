@@ -213,6 +213,39 @@ jobs:
           echo "=== requirements_final.txt ==="
           cat requirements_final.txt
 
+      # The OpenCV wheel is prepared inside this leg so the other platforms
+      # never wait for it. build-win-arm64-wheels.yml caches a smoke-tested
+      # wheel on main under this key; scripts/test_local_tooling.py keeps the
+      # two workflows' key and path identical.
+      - name: Restore smoke-tested OpenCV wheel
+        id: opencv-cache
+        if: matrix.python_platform == 'aarch64-pc-windows-msvc'
+        uses: actions/cache/restore@v6
+        with:
+          path: build/opencv/wheels
+          key: opencv-python-win-arm64-${{ hashFiles('scripts/build_opencv_arm64.py') }}
+
+      # No entry yet for this recipe, or it was evicted: build the same pinned
+      # sources here rather than fail the release. The stripped-environment
+      # smoke test below checks the wheel either way.
+      - name: Set up Python for the OpenCV build
+        id: opencv-python
+        if: matrix.python_platform == 'aarch64-pc-windows-msvc' && steps.opencv-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: arm64
+          # Leave PATH alone so later steps keep using the runner's Python.
+          update-environment: false
+
+      - name: Build OpenCV from pinned public sources
+        if: matrix.python_platform == 'aarch64-pc-windows-msvc' && steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          BUILD_PYTHON: ${{ steps.opencv-python.outputs.python-path }}
+        run: |
+          & $env:BUILD_PYTHON scripts/build_opencv_arm64.py --work-dir build/opencv
+
       - name: Install dependencies into standalone Python
         shell: bash
         run: |
@@ -226,29 +259,14 @@ jobs:
           "$PYTHON" -m ensurepip --upgrade 2>/dev/null || true
           "$PYTHON" -m pip install --upgrade pip
 
-          # ComfyUI requires these native Rust extensions, but neither package
-          # publishes a Windows ARM64 wheel on PyPI yet. Install the verified
-          # wheels from win-arm64-wheels-v1 first so the later unpinned
-          # requirements resolve to these already-installed versions.
+          # Resolve the OpenCV wheel from the steps above with the full
+          # requirements so NumPy/torch constraints are respected, and never
+          # compile the Rust extensions from source.
           if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
-            WHEEL_RELEASE="https://github.com/Comfy-Org/ComfyUI-Standalone-Environments/releases/download/win-arm64-wheels-v1"
-            mkdir win-arm64-wheels
-            # actions/checkout may convert text files to CRLF on Windows.
-            # Normalize once so the carriage return cannot enter a URL or
-            # checksum filename.
-            tr -d '\r' < win-arm64-wheels.sha256 > win-arm64-wheels/checksums.sha256
-            while read -r _ filename; do
-              curl -fL --retry 3 \
-                -o "win-arm64-wheels/$filename" \
-                "$WHEEL_RELEASE/$filename"
-            done < win-arm64-wheels/checksums.sha256
-            (cd win-arm64-wheels && sha256sum -c checksums.sha256)
-            "$PYTHON" -m pip install --no-cache-dir \
-              win-arm64-wheels/blake3-1.0.9-cp313-cp313-win_arm64.whl \
-              win-arm64-wheels/kornia_rs-0.1.14-cp313-cp313-win_arm64.whl
+            "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2 build/opencv/wheels/*.whl
+          else
+            "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2
           fi
-
-          "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2
 
       - name: Bundle uv
         shell: bash
@@ -356,15 +374,7 @@ jobs:
           "
 
           if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
-            echo "=== Verifying hosted Windows ARM64 wheels ==="
-            "$PYTHON" -c "
-          import importlib.metadata
-          import blake3
-          import kornia_rs
-          assert blake3.__version__ == '1.0.9', blake3.__version__
-          assert importlib.metadata.version('kornia-rs') == '0.1.14'
-          print('blake3 and kornia-rs ARM64 imports OK')
-          "
+            "$PYTHON" scripts/smoke_win_arm64.py
           fi
 
       - name: Generate build manifest
