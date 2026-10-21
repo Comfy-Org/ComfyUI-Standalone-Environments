@@ -36,7 +36,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from build_opencv_arm64 import build as build_opencv_wheel
+from build_opencv_arm64 import build as build_opencv_wheels
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -209,7 +209,7 @@ def install_requirements(work, variant, vendor_req_name):
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=work)
     wheels = []
     if PYTHON_PLATFORMS[variant] == "aarch64-pc-windows-msvc":
-        wheels.append(str(build_opencv_wheel(work / "opencv-build")))
+        wheels.extend(str(wheel) for wheel in build_opencv_wheels(work / "opencv-build"))
     run([str(python), "-m", "pip", "install", "--no-cache-dir",
          "-r", "requirements_final.txt", "pygit2", *wheels], cwd=work)
 

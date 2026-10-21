@@ -17,6 +17,11 @@ cryptography==46.0.3
 blake3==1.0.11
 kornia-rs==0.1.15
 
-# OpenCV is supplied as a wheel built from pinned public sources by
-# scripts/build_opencv_arm64.py (no public win_arm64 wheel on PyPI yet).
+# OpenCV is built from pinned public sources by scripts/build_opencv_arm64.py
+# (no public win_arm64 wheel on PyPI yet). The contrib build provides cv2; the
+# other three names are empty wheels that depend on it, so custom nodes that
+# require any of them resolve to the same build.
+opencv-contrib-python==4.14.0+c9cce3d
 opencv-python==4.14.0+c9cce3d
+opencv-python-headless==4.14.0+c9cce3d
+opencv-contrib-python-headless==4.14.0+c9cce3d

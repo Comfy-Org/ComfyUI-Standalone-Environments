@@ -6,11 +6,15 @@ Run: python3 -m unittest scripts.test_local_tooling -v
  (or from scripts/: python3 -m unittest test_local_tooling)
 """
 
+import base64
+import hashlib
+import importlib.metadata
 import json
 import re
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 from pathlib import Path
 
@@ -108,28 +112,35 @@ class WindowsArm64Requirements(unittest.TestCase):
     def test_cryptography_uses_last_public_windows_arm64_wheel(self):
         self.assertIn("cryptography==46.0.3", self.text)
 
-    def test_opencv_pin_matches_the_pinned_source_commit(self):
+    def test_every_opencv_name_pins_the_build_from_the_pinned_commit(self):
         # find_version.py appends the 7-character commit (core.abbrev 7), so
-        # bumping OPENCV_REF without this pin only fails at release install.
-        m = re.search(r"^opencv-python==[\d.]+\+([0-9a-f]+)$", self.text, re.M)
-        self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), build_opencv_arm64.OPENCV_REF[:7])
+        # bumping OPENCV_REF without these pins only fails at release install.
+        pins = dict(re.findall(r"^(opencv[\w-]*)==([\d.]+\+[0-9a-f]+)$", self.text, re.M))
+        self.assertEqual(len(re.findall(r"^opencv", self.text, re.M)), len(pins))
+        self.assertEqual(set(pins),
+                         {build_opencv_arm64.PROVIDER, *build_opencv_arm64.ALIASES})
+        versions = set(pins.values())
+        self.assertEqual(len(versions), 1, versions)
+        self.assertTrue(versions.pop().endswith(f"+{build_opencv_arm64.OPENCV_REF[:7]}"))
 
 
 class WindowsArm64NativeDependencies(unittest.TestCase):
     def test_install_resolves_opencv_with_full_requirements(self):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
-            wheel = work / "opencv_python-4.14.0+c9cce3d-cp37-abi3-win_arm64.whl"
+            wheels = [work / "opencv_contrib_python-4.14.0+c9cce3d-cp37-abi3-win_arm64.whl",
+                      *(work / f"{build_opencv_arm64.wheel_name(name)}-4.14.0+c9cce3d-py3-none-any.whl"
+                        for name in build_opencv_arm64.ALIASES)]
             with patch.object(build_local, "HOST_OS", "win"), \
                     patch.object(build_local.subprocess, "run"), \
                     patch.object(build_local, "run") as run, \
-                    patch.object(build_local, "build_opencv_wheel", return_value=wheel) as build:
+                    patch.object(build_local, "build_opencv_wheels", return_value=wheels) as build:
                 build_local.install_requirements(
                     work, "beta-win-nvidia-arm64", "requirements-nvidia-arm64.txt")
             build.assert_called_once_with(work / "opencv-build")
             install = run.call_args_list[-1].args[0]
-            self.assertIn(str(wheel), install)
+            for wheel in wheels:
+                self.assertIn(str(wheel), install)
             self.assertIn("requirements_final.txt", install)
             requirements = (work / "requirements_final.txt").read_text()
             self.assertIn("--only-binary=blake3", requirements)
@@ -144,27 +155,62 @@ class WindowsArm64NativeDependencies(unittest.TestCase):
             with patch.object(build_local, "HOST_OS", "win"), \
                     patch.object(build_local.subprocess, "run"), \
                     patch.object(build_local, "run") as run, \
-                    patch.object(build_local, "build_opencv_wheel") as build:
+                    patch.object(build_local, "build_opencv_wheels") as build:
                 build_local.install_requirements(Path(tmp), "win-nvidia", "requirements-nvidia.txt")
             build.assert_not_called()
             self.assertFalse(any(str(arg).endswith(".whl") for arg in run.call_args.args[0]))
 
-    def test_wheel_selection_rejects_foreign_architecture_and_ambiguous_output(self):
+    def test_wheel_selection_requires_one_native_contrib_wheel(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            for name in ["opencv_python-4.14.0-cp37-abi3-win_amd64.whl",
-                         "opencv_python_headless-4.14.0-cp37-abi3-win_arm64.whl"]:
+            for name in ["opencv_contrib_python-4.14.0-cp37-abi3-win_amd64.whl",
+                         "opencv_python-4.14.0-cp37-abi3-win_arm64.whl",
+                         "opencv_contrib_python_headless-4.14.0-cp37-abi3-win_arm64.whl"]:
                 wheel = directory / name
                 wheel.touch()
                 with self.assertRaises(RuntimeError):
                     build_opencv_arm64.find_wheel(directory)
                 wheel.unlink()
-            wheel = directory / "opencv_python-4.14.0+c9cce3d-cp37-abi3-win_arm64.whl"
+            wheel = directory / "opencv_contrib_python-4.14.0+c9cce3d-cp37-abi3-win_arm64.whl"
             wheel.touch()
             self.assertEqual(build_opencv_arm64.find_wheel(directory), wheel)
             (directory / "extra.whl").touch()
             with self.assertRaises(RuntimeError):
                 build_opencv_arm64.find_wheel(directory)
+
+    def test_alias_wheels_hold_only_metadata_that_pins_the_provider(self):
+        version = "4.14.0+c9cce3d"
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in build_opencv_arm64.ALIASES:
+                directory = Path(tmp) / name
+                directory.mkdir()
+                wheel = build_opencv_arm64.write_alias_wheel(directory, name, version)
+                dist_info = f"{build_opencv_arm64.wheel_name(name)}-{version}.dist-info"
+                self.assertEqual(wheel.name,
+                                 f"{build_opencv_arm64.wheel_name(name)}-{version}-py3-none-any.whl")
+                with zipfile.ZipFile(wheel) as zf:
+                    contents = {path: zf.read(path) for path in zf.namelist()}
+                    zf.extractall(directory / "site")
+                # No cv2 files: uninstalling an alias must never touch the provider's.
+                self.assertTrue(all(path.startswith(f"{dist_info}/") for path in contents))
+                for line in contents[f"{dist_info}/RECORD"].decode().splitlines():
+                    path, hash_, size = line.rsplit(",", 2)
+                    if path.endswith("/RECORD"):
+                        continue
+                    digest = base64.urlsafe_b64encode(
+                        hashlib.sha256(contents[path]).digest()).rstrip(b"=").decode()
+                    self.assertEqual(hash_, f"sha256={digest}", path)
+                    self.assertEqual(int(size), len(contents[path]), path)
+                dist, = importlib.metadata.distributions(path=[str(directory / "site")])
+                self.assertEqual(dist.metadata["Name"], name)
+                self.assertEqual(dist.version, version)
+                self.assertEqual(dist.requires, [f"{build_opencv_arm64.PROVIDER}=={version}"])
+                # Identical bytes on every build keep the cached wheels stable.
+                again = Path(tmp) / f"{name}-again"
+                again.mkdir()
+                self.assertEqual(
+                    build_opencv_arm64.write_alias_wheel(again, name, version).read_bytes(),
+                    wheel.read_bytes())
 
     def test_foreign_host_is_rejected_before_running_tools(self):
         with tempfile.TemporaryDirectory() as tmp:

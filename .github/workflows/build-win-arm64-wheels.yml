@@ -58,8 +58,9 @@ jobs:
         shell: pwsh
         run: |
           python -m venv build/smoke
-          $wheel = Get-ChildItem build/opencv/wheels/*.whl
-          & build/smoke/Scripts/python.exe -m pip install --only-binary=:all: $wheel.FullName blake3==1.0.11 kornia-rs==0.1.15
+          # The contrib build plus the empty wheels for the other OpenCV names.
+          $wheels = Get-ChildItem build/opencv/wheels/*.whl
+          & build/smoke/Scripts/python.exe -m pip install --only-binary=:all: $wheels.FullName blake3==1.0.11 kornia-rs==0.1.15
           if ($LASTEXITCODE -ne 0) { throw "Native dependency install failed" }
       - name: Verify ARM64 imports, hashing and image round-trip
         run: build/smoke/Scripts/python.exe scripts/smoke_win_arm64.py
