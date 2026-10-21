@@ -23,16 +23,7 @@ permissions:
   contents: write
 
 jobs:
-  native-wheels:
-    uses: ./.github/workflows/build-win-arm64-wheels.yml
-    permissions:
-      contents: read
-
   build:
-    needs: native-wheels
-    # A failed ARM64 wheel must not skip the other platform builds. The ARM64
-    # matrix entry will fail when its required artifact is unavailable.
-    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -222,12 +213,38 @@ jobs:
           echo "=== requirements_final.txt ==="
           cat requirements_final.txt
 
-      - name: Download verified OpenCV wheel
+      # The OpenCV wheel is prepared inside this leg so the other platforms
+      # never wait for it. build-win-arm64-wheels.yml caches a smoke-tested
+      # wheel on main under this key; scripts/test_local_tooling.py keeps the
+      # two workflows' key and path identical.
+      - name: Restore smoke-tested OpenCV wheel
+        id: opencv-cache
         if: matrix.python_platform == 'aarch64-pc-windows-msvc'
-        uses: actions/download-artifact@v7
+        uses: actions/cache/restore@v6
         with:
-          name: opencv-python-win-arm64
-          path: win-arm64-wheels
+          path: build/opencv/wheels
+          key: opencv-python-win-arm64-${{ hashFiles('scripts/build_opencv_arm64.py') }}
+
+      # No entry yet for this recipe, or it was evicted: build the same pinned
+      # sources here rather than fail the release. The stripped-environment
+      # smoke test below checks the wheel either way.
+      - name: Set up Python for the OpenCV build
+        id: opencv-python
+        if: matrix.python_platform == 'aarch64-pc-windows-msvc' && steps.opencv-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: arm64
+          # Leave PATH alone so later steps keep using the runner's Python.
+          update-environment: false
+
+      - name: Build OpenCV from pinned public sources
+        if: matrix.python_platform == 'aarch64-pc-windows-msvc' && steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          BUILD_PYTHON: ${{ steps.opencv-python.outputs.python-path }}
+        run: |
+          & $env:BUILD_PYTHON scripts/build_opencv_arm64.py --work-dir build/opencv
 
       - name: Install dependencies into standalone Python
         shell: bash
@@ -242,11 +259,11 @@ jobs:
           "$PYTHON" -m ensurepip --upgrade 2>/dev/null || true
           "$PYTHON" -m pip install --upgrade pip
 
-          # The wheel was built and smoke-tested in this workflow run.
-          # Resolve it with the full requirements so NumPy/torch constraints
-          # are respected, and never compile the Rust extensions from source.
+          # Resolve the OpenCV wheel from the steps above with the full
+          # requirements so NumPy/torch constraints are respected, and never
+          # compile the Rust extensions from source.
           if [[ "${{ runner.os }}" == "Windows" && "${{ runner.arch }}" == "ARM64" ]]; then
-            "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2 win-arm64-wheels/*.whl
+            "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2 build/opencv/wheels/*.whl
           else
             "$PYTHON" -m pip install --no-cache-dir -r requirements_final.txt pygit2
           fi

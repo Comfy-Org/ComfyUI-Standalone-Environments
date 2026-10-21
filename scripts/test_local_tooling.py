@@ -108,6 +108,13 @@ class WindowsArm64Requirements(unittest.TestCase):
     def test_cryptography_uses_last_public_windows_arm64_wheel(self):
         self.assertIn("cryptography==46.0.3", self.text)
 
+    def test_opencv_pin_matches_the_pinned_source_commit(self):
+        # find_version.py appends the 7-character commit (core.abbrev 7), so
+        # bumping OPENCV_REF without this pin only fails at release install.
+        m = re.search(r"^opencv-python==[\d.]+\+([0-9a-f]+)$", self.text, re.M)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), build_opencv_arm64.OPENCV_REF[:7])
+
 
 class WindowsArm64NativeDependencies(unittest.TestCase):
     def test_install_resolves_opencv_with_full_requirements(self):
@@ -168,6 +175,43 @@ class WindowsArm64NativeDependencies(unittest.TestCase):
                     build_opencv_arm64.build(work)
             run.assert_not_called()
             self.assertFalse(work.exists())
+
+
+class OpenCvWheelCache(unittest.TestCase):
+    """build-win-arm64-wheels.yml caches a smoke-tested wheel that
+    build-standalone-env.yml restores at release time. The main workflow
+    never runs on pull requests, so drift here would first fail a release."""
+
+    @classmethod
+    def setUpClass(cls):
+        workflows = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+        cls.wheels = (workflows / "build-win-arm64-wheels.yml").read_text(encoding="utf-8")
+        cls.release = (workflows / "build-standalone-env.yml").read_text(encoding="utf-8")
+
+    @staticmethod
+    def cache_entries(text):
+        return re.findall(
+            r"uses: actions/cache(?:/restore)?@\S+\n\s+with:\n\s+path: (\S+)\n\s+key: (.+)$",
+            text, re.M)
+
+    def test_release_restores_the_entry_the_wheel_workflow_saves(self):
+        saved = self.cache_entries(self.wheels)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(self.cache_entries(self.release), saved)
+
+    def test_key_follows_the_recipe_and_path_matches_the_build_output(self):
+        (path, key), = self.cache_entries(self.wheels)
+        self.assertIn("hashFiles('scripts/build_opencv_arm64.py')", key)
+        # build_opencv_arm64.build() writes its wheel to <work-dir>/wheels.
+        self.assertEqual(path, "build/opencv/wheels")
+        for text in (self.wheels, self.release):
+            self.assertIn("scripts/build_opencv_arm64.py --work-dir build/opencv", text)
+        self.assertIn("build/opencv/wheels/*.whl", self.release)
+
+    def test_platform_builds_do_not_wait_for_another_job(self):
+        build_job = self.release[self.release.index("\n  build:\n"):
+                                 self.release.index("\n  publish-manifests:\n")]
+        self.assertNotRegex(build_job, r"(?m)^    needs:")
 
 
 class WorkflowParity(unittest.TestCase):

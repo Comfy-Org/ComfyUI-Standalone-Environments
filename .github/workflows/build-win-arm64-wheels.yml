@@ -3,9 +3,22 @@ name: Build Windows ARM64 OpenCV
 # Build public sources; NVIDIA's evaluation archive is not redistributable.
 # Rust dependencies now have native PyPI wheels. Historical v1 assets remain
 # available for older environment definitions that still reference them.
+#
+# A wheel that passes the smoke test is cached under a key derived from the
+# build script. Environment releases restore that entry from main, so they
+# ship the same tested bytes instead of rebuilding OpenCV every time.
 on:
-  workflow_call:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-win-arm64-wheels.yml
+      - scripts/build_opencv_arm64.py
+  # GitHub evicts cache entries unused for 7 days, and a restore counts as
+  # use. Twice a week keeps main's entry alive between releases.
+  schedule:
+    - cron: "23 5 * * 1,4"
   pull_request:
     paths:
       - .github/workflows/build-win-arm64-wheels.yml
@@ -29,7 +42,17 @@ jobs:
         with:
           python-version: "3.13"
           architecture: arm64
+      # Saved in a post step that runs only when every step below succeeds,
+      # so a restored wheel has always passed the smoke test.
+      # build-standalone-env.yml restores the same key and path.
+      - name: Restore smoke-tested OpenCV wheel
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: build/opencv/wheels
+          key: opencv-python-win-arm64-${{ hashFiles('scripts/build_opencv_arm64.py') }}
       - name: Build OpenCV from pinned public sources
+        if: steps.cache.outputs.cache-hit != 'true'
         run: python scripts/build_opencv_arm64.py --work-dir build/opencv
       - name: Install native wheels into a clean test environment
         shell: pwsh
