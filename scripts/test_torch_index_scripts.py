@@ -317,6 +317,23 @@ class RefresherParsing(unittest.TestCase):
             ],
         )
 
+    def test_parse_index_accepts_py3_none_wheels(self):
+        html = index_html(
+            [
+                "torchvision-0.30.0.dev20261008%2Bcu132-py3-none-win_amd64.whl",
+                "torchvision-0.30.0.dev20261008%2Bcu132-py3-none-manylinux_2_28_x86_64.whl",
+                "torchvision-0.30.0.dev20261008%2Bcu132-py3-none-manylinux_2_28_aarch64.whl",
+            ]
+        )
+        wheels = refresher.parse_index("torchvision", "cu132", html)
+        self.assertEqual(
+            sorted(wheels),
+            [
+                ("0.30.0.dev20261008+cu132", "linux", "any"),
+                ("0.30.0.dev20261008+cu132", "win32", "any"),
+            ],
+        )
+
 
 def fake_indexes(data):
     """fetch_index replacement: data[package] = list of wheel triples."""
@@ -358,6 +375,33 @@ class RefresherResolution(unittest.TestCase):
         self.assertEqual(sorted(entry["platforms"]), ["linux", "win32"])
         self.assertEqual(entry["pythonAbis"], ["3.12", "3.13"])
         self.assertEqual(entry["packages"]["torch"], f"2.14.0.dev{day}+cu132")
+
+    def test_py3_none_companions_take_torch_abis(self):
+        today = utc_today()
+        day = (today - timedelta(days=1)).strftime("%Y%m%d")
+        both = {"win32": ["3.12", "3.13"], "linux": ["3.12"]}
+        universal = {"win32": ["any"], "linux": ["any"]}
+        data = {
+            "torch": triples("2.16.0", day, both),
+            "torchvision": triples("0.30.0", day, universal),
+            "torchaudio": triples("2.11.0", day, universal),
+        }
+        entry, err, _ = self.resolve(data)
+        self.assertIsNone(err)
+        self.assertEqual(sorted(entry["platforms"]), ["linux", "win32"])
+        self.assertEqual(entry["pythonAbis"], ["3.12"])
+
+    def test_all_py3_none_has_no_abi_to_advertise(self):
+        today = utc_today()
+        day = (today - timedelta(days=1)).strftime("%Y%m%d")
+        universal = {"win32": ["any"]}
+        data = {
+            pkg: triples(ver, day, universal)
+            for pkg, ver in (("torch", "2.16.0"), ("torchvision", "0.30.0"), ("torchaudio", "2.11.0"))
+        }
+        entry, err, _ = self.resolve(data)
+        self.assertIsNone(entry)
+        self.assertIsNotNone(err)
 
     def test_one_platform_abi_gap_shrinks_global_abis(self):
         # torchaudio missing linux 3.12: 3.12 must NOT be advertised

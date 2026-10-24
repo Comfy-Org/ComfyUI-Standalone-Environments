@@ -35,6 +35,7 @@ WHEEL_RE = re.compile(
     r"^(?P<name>[A-Za-z0-9_]+)-(?P<version>[A-Za-z0-9.!+]+)"
     r"-(?P<pytag>[a-z0-9]+)-(?P<abitag>[a-z0-9]+)-(?P<plattag>[a-z0-9_.]+)\.whl$"
 )
+ANY_ABI = "any"
 DEV_DATE_RE = re.compile(r"\.dev(\d{8})\+")
 ANCHOR_TEXT_RE = re.compile(r">([^<>]+\.whl)</a>")
 
@@ -64,10 +65,20 @@ def abi_for_wheel(pytag, abitag):
     """`major.minor` for a standard CPython wheel; None for anything else
     (freethreaded cp31Xt, abi3, pypy) - the desktop app's venvs are
     standard CPython."""
+    if pytag == "py3" and abitag == "none":
+        return ANY_ABI
     m = re.fullmatch(r"cp3(\d+)", pytag)
     if not m or abitag != pytag:
         return None
     return f"3.{m.group(1)}"
+
+
+def shared_abis(abi_sets):
+    """ABIs common to every set; a set holding ANY_ABI fits all of them."""
+    concrete = [s for s in abi_sets if ANY_ABI not in s]
+    if not concrete:
+        return set()
+    return set.intersection(*concrete)
 
 
 def fetch_index(tag, package):
@@ -142,7 +153,7 @@ def resolve_tag(tag, today):
         for p in ("win32", "linux"):
             if not all(p in s["plat_abis"] for s in slots.values()):
                 continue
-            shared = set.intersection(*(s["plat_abis"][p] for s in slots.values()))
+            shared = shared_abis([s["plat_abis"][p] for s in slots.values()])
             if shared:
                 abis_by_platform[p] = shared
         if not abis_by_platform:
